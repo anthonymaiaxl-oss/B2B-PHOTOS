@@ -8,16 +8,13 @@ export default function Reveal({
   children,
   className,
   delay = 0,
-  as: Tag = "div",
 }: {
   children: React.ReactNode;
   className?: string;
   delay?: number;
-  as?: "div" | "section" | "li";
 }) {
-  const Motion = motion[Tag];
   return (
-    <Motion
+    <motion.div
       variants={revealVariants}
       initial="hidden"
       whileInView="visible"
@@ -26,6 +23,6 @@ export default function Reveal({
       className={className}
     >
       {children}
-    </Motion>
+    </motion.div>
   );
 }

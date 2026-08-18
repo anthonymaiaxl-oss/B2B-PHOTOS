@@ -1,6 +1,6 @@
 import type { Transition, Variants } from "framer-motion";
 
-export const EASE = [0.16, 1, 0.3, 1] as const;
+export const EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
 
 export const smooth: Transition = { duration: 0.8, ease: EASE };
 
