@@ -8,7 +8,8 @@ import ScrollStory from "@/components/ScrollStory";
 import StatsSection from "@/components/StatsSection";
 import { getAllAlbums } from "@/lib/google-drive";
 
-// Deve ser um literal: o Next lê este valor estaticamente.
+// 10 minutos. Precisa ser um literal: o Next lê este export por análise
+// estática e não resolve identificador importado (REVALIDATE_SECONDS).
 export const revalidate = 600;
 
 export default async function HomePage() {
