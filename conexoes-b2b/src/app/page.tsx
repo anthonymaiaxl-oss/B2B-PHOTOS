@@ -6,7 +6,6 @@ import Hero from "@/components/Hero";
 import HighlightGallery from "@/components/HighlightGallery";
 import ScrollStory from "@/components/ScrollStory";
 import StatsSection from "@/components/StatsSection";
-import { getAllAlbums } from "@/lib/google-drive";
 
 // 10 minutos. Precisa ser um literal: o Next lê este export por análise
 // estática e não resolve identificador importado (REVALIDATE_SECONDS).
