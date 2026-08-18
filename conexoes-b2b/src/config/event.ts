@@ -61,4 +61,8 @@ export const eventConfig: EventConfig = {
 };
 
 export const PHOTOS_PER_PAGE = 24;
+// Usado pelo fetch do Drive em src/lib/google-drive.ts.
+// ATENÇÃO: as rotas (src/app/page.tsx e src/app/album/[slug]/page.tsx) NÃO podem
+// importar esta constante — o Next exige literal no export `revalidate`. Se mudar
+// este valor, mude o 600 nos dois arquivos também.
 export const REVALIDATE_SECONDS = 600;
