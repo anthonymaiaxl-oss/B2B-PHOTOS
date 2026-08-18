@@ -7,7 +7,8 @@ import PhotoGrid from "@/components/PhotoGrid";
 import { eventConfig } from "@/config/event";
 import { getAlbumPhotos } from "@/lib/google-drive";
 
-// Deve ser um literal: o Next lê este valor estaticamente.
+// 10 minutos. Precisa ser um literal: o Next lê este export por análise
+// estática e não resolve identificador importado (REVALIDATE_SECONDS).
 export const revalidate = 600;
 
 export function generateStaticParams() {
