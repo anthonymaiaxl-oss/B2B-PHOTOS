@@ -94,7 +94,9 @@ O `id` vira a URL (`/album/palestras`). Nenhum outro arquivo precisa ser editado
 Google Drive → abrir a pasta do álbum → arrastar as fotos → pronto
 ```
 
-O site revalida o cache a cada **10 minutos** (`REVALIDATE_SECONDS` em `src/config/event.ts`), então fotos novas aparecem em poucos minutos sem tocar em código nem refazer deploy. Isso também mantém o consumo da API baixo.
+O site revalida o cache a cada **10 minutos**, então fotos novas aparecem em poucos minutos sem tocar em código nem refazer deploy. Isso também mantém o consumo da API baixo.
+
+Para mudar esse intervalo é preciso alterar **três** lugares, porque o Next não aceita constante importada no export `revalidate` de uma rota: `REVALIDATE_SECONDS` em `src/config/event.ts` (usado no fetch do Drive) e o literal `600` em `src/app/page.tsx` e `src/app/album/[slug]/page.tsx`.
 
 Para forçar atualização imediata: na Vercel, **Deployments → ⋯ → Redeploy**.
 
