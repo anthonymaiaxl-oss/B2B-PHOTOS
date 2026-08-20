@@ -1,9 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Download, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { eventConfig } from "@/config/event";
+import { downloadOne } from "@/lib/download";
 import { EASE } from "@/lib/motion";
 import type { Photo } from "@/types";
 
@@ -52,15 +53,15 @@ export default function PhotoLightbox({
 
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 2200);
+    const timer = window.setTimeout(() => setToast(null), 2400);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
   const share = async () => {
     const url = typeof window === "undefined" ? "" : window.location.href;
     const payload = {
-      title: "Conexões B2B",
-      text: "Confira essa foto do Conexões B2B.",
+      title: eventConfig.name,
+      text: `Confira as fotos do ${eventConfig.name}.`,
       url,
     };
     if (navigator.share) {
@@ -68,7 +69,7 @@ export default function PhotoLightbox({
         await navigator.share(payload);
         return;
       } catch {
-        /* usuário cancelou */
+        /* o usuário cancelou */
       }
     }
     try {
@@ -79,25 +80,8 @@ export default function PhotoLightbox({
     }
   };
 
-  const download = () => {
-    try {
-      const anchor = document.createElement("a");
-      anchor.href = photo.downloadUrl;
-      anchor.download = `${albumName}-${photo.name}.jpg`;
-      anchor.rel = "noopener";
-      anchor.target = "_blank";
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      setToast("BAIXANDO…");
-    } catch {
-      window.open(photo.downloadUrl, "_blank", "noopener");
-      setToast("ABERTO EM NOVA ABA");
-    }
-  };
-
   const control =
-    "flex items-center justify-center rounded-full border border-[#26232f] text-white transition-colors duration-300 hover:border-violet";
+    "flex items-center justify-center rounded-full border border-gold/30 text-white transition-colors duration-300 hover:border-gold hover:text-gold-bright";
 
   return (
     <AnimatePresence>
@@ -109,13 +93,19 @@ export default function PhotoLightbox({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.35, ease: EASE }}
-        className="fixed inset-0 z-[100] flex flex-col bg-black"
+        className="fixed inset-0 z-[100] flex flex-col bg-[#02040a]"
       >
         <div className="flex items-center justify-between px-4 py-4">
-          <span className="font-[family-name:var(--font-plex)] text-[10px] tracking-[0.18em] text-muted">
-            {index + 1} / {photos.length} · {albumName.toUpperCase()}
+          <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.18em] text-muted">
+            <span className="text-gold">{index + 1}</span> / {photos.length} ·{" "}
+            {albumName.toUpperCase()}
           </span>
-          <button type="button" onClick={onClose} aria-label="Fechar" className={`${control} h-12 w-12`}>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar"
+            className={`${control} h-12 w-12`}
+          >
             <X size={18} strokeWidth={1.5} />
           </button>
         </div>
@@ -132,51 +122,67 @@ export default function PhotoLightbox({
           initial={{ opacity: 0, scale: 1.03, filter: "blur(6px)" }}
           animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
           transition={{ duration: 0.6, ease: EASE }}
-          className="relative min-h-0 flex-1 touch-pan-y px-3.5"
+          className="relative flex min-h-0 flex-1 touch-pan-y items-center justify-center px-3.5"
         >
           {failed ? (
-            <div className="flex h-full items-center justify-center text-center font-[family-name:var(--font-plex)] text-[10px] tracking-[0.18em] text-muted">
+            <p className="text-center font-[family-name:var(--font-mono)] text-[10px] tracking-[0.18em] text-muted">
               NÃO FOI POSSÍVEL CARREGAR ESTA FOTO
-            </div>
+            </p>
           ) : (
-            <Image
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
               src={photo.previewUrl}
               alt={`${albumName} — ${photo.name}`}
-              fill
-              priority
-              sizes="100vw"
               onError={() => setFailed(true)}
-              className="object-contain"
+              draggable={false}
+              className="max-h-full max-w-full object-contain"
             />
           )}
         </motion.div>
 
         <div className="flex flex-col items-center gap-3 px-4 pb-8 pt-4">
-          <div className="flex items-center justify-center gap-2.5">
-            <button type="button" onClick={() => step(-1)} aria-label="Foto anterior" className={`${control} h-[52px] w-[52px]`}>
-              <ArrowLeft size={17} strokeWidth={1.5} />
-            </button>
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
             <button
               type="button"
-              onClick={download}
-              className={`${control} h-[52px] gap-2 px-5 font-[family-name:var(--font-plex)] text-[10px] tracking-[0.16em]`}
+              onClick={() => step(-1)}
+              aria-label="Foto anterior"
+              className={`${control} h-[52px] w-[52px]`}
             >
-              <Download size={15} strokeWidth={1.5} /> BAIXAR
+              <ArrowLeft size={17} strokeWidth={1.5} />
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                downloadOne(photo, albumName);
+                setToast("BAIXANDO EM ALTA…");
+              }}
+              className="flex h-[52px] items-center gap-2 rounded-full border border-gold bg-gradient-to-b from-gold-bright to-gold px-6 font-[family-name:var(--font-mono)] text-[10px] font-bold tracking-[0.16em] text-ink transition-all duration-300 hover:from-white hover:to-gold-bright"
+            >
+              <Download size={15} strokeWidth={2} /> BAIXAR
+            </button>
+
             <button
               type="button"
               onClick={share}
-              className={`${control} h-[52px] gap-2 px-5 font-[family-name:var(--font-plex)] text-[10px] tracking-[0.16em]`}
+              className={`${control} h-[52px] gap-2 px-5 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.16em]`}
             >
               <Share2 size={15} strokeWidth={1.5} /> COMPARTILHAR
             </button>
-            <button type="button" onClick={() => step(1)} aria-label="Próxima foto" className={`${control} h-[52px] w-[52px]`}>
+
+            <button
+              type="button"
+              onClick={() => step(1)}
+              aria-label="Próxima foto"
+              className={`${control} h-[52px] w-[52px]`}
+            >
               <ArrowRight size={17} strokeWidth={1.5} />
             </button>
           </div>
+
           <span
             aria-live="polite"
-            className="h-3 font-[family-name:var(--font-plex)] text-[9px] tracking-[0.18em] text-violet-bright"
+            className="h-3 font-[family-name:var(--font-mono)] text-[9px] tracking-[0.18em] text-gold"
           >
             {toast ?? ""}
           </span>

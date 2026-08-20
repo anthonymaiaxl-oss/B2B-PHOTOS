@@ -51,10 +51,10 @@ export default function CustomCursor() {
       className="pointer-events-none fixed left-0 top-0 z-[110] will-change-transform"
     >
       <div
-        className={`flex items-center justify-center rounded-full border border-violet-bright/70 font-[family-name:var(--font-plex)] text-[9px] tracking-[0.14em] text-white transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+        className={`flex items-center justify-center rounded-full border border-gold/70 font-[family-name:var(--font-mono)] text-[9px] tracking-[0.14em] text-gold-bright transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
           active
-            ? "-ml-7 -mt-7 h-14 w-14 bg-violet/20 opacity-100"
-            : "-ml-1.5 -mt-1.5 h-3 w-3 bg-transparent opacity-50"
+            ? "-ml-7 -mt-7 h-14 w-14 bg-gold/15 opacity-100"
+            : "-ml-1.5 -mt-1.5 h-3 w-3 bg-transparent opacity-60"
         }`}
       >
         {active ? label : ""}

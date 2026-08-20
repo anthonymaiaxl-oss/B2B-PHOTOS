@@ -1,67 +1,97 @@
 import type { EventConfig } from "@/types";
 
 /**
- * Único arquivo que o administrador precisa editar.
- * Os folderIds vêm da URL de cada pasta no Google Drive:
- * https://drive.google.com/drive/folders/  <-- ISTO É O ID -->
+ * Único arquivo de conteúdo do site.
+ *
+ * Os álbuns NÃO ficam aqui: cada subpasta de GOOGLE_DRIVE_ROOT_FOLDER_ID
+ * vira um álbum automaticamente. Criou a pasta no /admin (ou no Drive),
+ * o álbum aparece no site — sem mexer em código, sem redeploy.
  */
 export const eventConfig: EventConfig = {
-  name: "Conexões B2B",
+  brand: "B2B Conexões",
+  name: "Master Class Reforma Tributária",
   edition: "2026",
-  date: "12 de março de 2026",
-  location: "São Paulo · SP",
-  description: "Reviva os melhores momentos do Conexões B2B.",
+  // Deixe vazio para o site simplesmente não mostrar a informação.
+  date: "",
+  location: "",
+  description:
+    "As fotos oficiais da Master Class Reforma Tributária. Encontre a sua e baixe em alta.",
 
   hero: {
-    kicker: "SÃO PAULO · 2026 · DIGITAL EXPERIENCE",
-    headline: "Os momentos que conectaram negócios.",
+    kicker: "CONHECIMENTO · NETWORKING · ESTRATÉGIA",
+    titleTop: "MASTER CLASS",
+    titleMain: "REFORMA TRIBUTÁRIA",
+    headline: "Prepare-se para o novo cenário.",
     subheadline:
-      "Reviva as conexões, encontros e ideias que fizeram parte do Conexões B2B.",
-    cta: "EXPLORAR FOTOS",
+      "O registro completo do dia: as palestras, as conversas de corredor e as conexões que saíram daqui.",
+    cta: "VER AS FOTOS",
   },
 
-  stats: [
-    { value: 520, prefix: "+", label: "FOTOS" },
-    { value: 140, prefix: "+", label: "CONEXÕES" },
-    { value: 1, prefix: "0", label: "EVENTO" },
+  // Coloque a arte do selo em public/selo.png e troque para "/selo.png".
+  sealImage: "",
+
+  partners: [
+    { name: "acenm·cdl" },
+    { name: "Ecofiscal", tagline: "Ecossistema de Inteligência Empresarial" },
+    { name: "B2B Conexões" },
+    { name: "Corlleón", tagline: "Inteligência Contábil e Tributária" },
   ],
 
   story: [
     {
       num: "01",
-      word: "CONEXÕES",
-      text: "Apertos de mão que viraram parcerias. O evento começa antes da primeira palestra.",
+      word: "CONHECIMENTO",
+      text: "A reforma explicada por quem vive o dia a dia da apuração — sem juridiquês, com o impacto real no caixa.",
     },
     {
       num: "02",
-      word: "IDEIAS",
-      text: "Painéis, provocações e insights que mudaram a forma de olhar o próprio negócio.",
+      word: "NETWORKING",
+      text: "Contador, empresário e consultor na mesma sala. Boa parte do valor do dia aconteceu no intervalo do café.",
     },
     {
       num: "03",
-      word: "NEGÓCIOS",
-      text: "Rodadas de negociação, propostas trocadas, decisões tomadas no corredor.",
+      word: "ESTRATÉGIA",
+      text: "O que muda no seu regime, no seu preço e no seu contrato — e o que dá para decidir agora, antes da transição.",
     },
     {
       num: "04",
       word: "MOMENTOS",
-      text: "O que ficou: risadas, aplausos, o brinde no fim da noite.",
+      text: "As perguntas difíceis, os aplausos, o aperto de mão no fim da tarde. Está tudo aqui.",
     },
   ],
 
-  albums: [
+  albumCaptions: {
+    palestras: "Palco principal",
+    networking: "Intervalos e café",
+    participantes: "Retratos",
+    credenciamento: "Chegada e recepção",
+    bastidores: "Backstage",
+    encerramento: "Certificados e brinde",
+  },
+
+  // Usados só enquanto o Drive não está conectado (modo demonstração).
+  demoAlbums: [
     { id: "palestras", name: "Palestras", caption: "Palco principal", folderId: "" },
-    { id: "networking", name: "Networking", caption: "Lounge e café", folderId: "" },
+    { id: "networking", name: "Networking", caption: "Intervalos e café", folderId: "" },
     { id: "participantes", name: "Participantes", caption: "Retratos", folderId: "" },
-    { id: "especiais", name: "Momentos Especiais", caption: "Premiação", folderId: "" },
-    { id: "bastidores", name: "Bastidores", caption: "Backstage", folderId: "" },
+    { id: "credenciamento", name: "Credenciamento", caption: "Chegada e recepção", folderId: "" },
+    { id: "encerramento", name: "Encerramento", caption: "Certificados e brinde", folderId: "" },
   ],
 
   credit: "Digital Experience by Gabriel Maia",
 };
 
+/** Fotos carregadas por vez na página de álbum. */
 export const PHOTOS_PER_PAGE = 24;
-// Usado pelo fetch do Drive em src/lib/google-drive.ts.
+
+/** Teto de fotos por ZIP — acima disso o navegador começa a sofrer. */
+export const MAX_ZIP_PHOTOS = 60;
+
+/** Largura máxima (px) da foto otimizada no envio. */
+export const UPLOAD_MAX_EDGE = 2560;
+export const UPLOAD_QUALITY = 0.88;
+
+// Usado pelo fetch do Drive em src/lib/drive.ts.
 // ATENÇÃO: as rotas (src/app/page.tsx e src/app/album/[slug]/page.tsx) NÃO podem
 // importar esta constante — o Next exige literal no export `revalidate`. Se mudar
 // este valor, mude o 600 nos dois arquivos também.

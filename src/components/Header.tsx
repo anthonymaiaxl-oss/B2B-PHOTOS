@@ -17,20 +17,27 @@ export default function Header({ solid = false }: { solid?: boolean }) {
 
   return (
     <header
-      className={`fixed inset-x-0 top-0 z-[90] flex items-center justify-between bg-gradient-to-b from-ink/95 to-transparent px-[22px] py-4 transition-opacity duration-500 ${
+      className={`fixed inset-x-0 top-0 z-[90] transition-opacity duration-500 ${
         visible ? "opacity-100" : "pointer-events-none opacity-0"
       }`}
     >
-      <Link
-        href="/"
-        data-cursor="•"
-        className="text-[11px] font-semibold tracking-[0.3em] text-white hover:text-white"
-      >
-        {eventConfig.name.toUpperCase()}
-      </Link>
-      <span className="font-[family-name:var(--font-plex)] text-[10px] tracking-[0.16em] text-muted">
-        {eventConfig.edition}
-      </span>
+      <div className="flex items-center justify-between bg-gradient-to-b from-ink/95 via-ink/70 to-transparent px-[22px] py-4 backdrop-blur-[2px]">
+        <Link
+          href="/"
+          data-cursor="•"
+          className="flex items-center gap-2.5 text-[11px] font-bold tracking-[0.3em] text-white"
+        >
+          <span className="block h-1.5 w-1.5 rotate-45 bg-gold" />
+          {eventConfig.brand.toUpperCase()}
+        </Link>
+        <span className="hidden font-[family-name:var(--font-mono)] text-[10px] tracking-[0.16em] text-gold/70 sm:block">
+          {eventConfig.name.toUpperCase()}
+        </span>
+        <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.16em] text-muted">
+          {eventConfig.edition}
+        </span>
+      </div>
+      <div className="gold-rule opacity-50" />
     </header>
   );
 }

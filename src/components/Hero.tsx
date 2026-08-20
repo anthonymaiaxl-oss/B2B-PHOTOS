@@ -1,10 +1,11 @@
 "use client";
 
-import Image from "next/image";
 import { motion, useMotionValue, useReducedMotion, useSpring } from "framer-motion";
 import { useEffect } from "react";
 import { eventConfig } from "@/config/event";
 import { EASE } from "@/lib/motion";
+import EventSeal from "./EventSeal";
+import PartnerRow from "./PartnerRow";
 import type { Photo } from "@/types";
 
 export default function Hero({ photo }: { photo: Photo | null }) {
@@ -18,8 +19,8 @@ export default function Hero({ photo }: { photo: Photo | null }) {
     if (reduced) return;
     if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
     const onMove = (event: MouseEvent) => {
-      rawX.set((event.clientX / window.innerWidth - 0.5) * 60);
-      rawY.set((event.clientY / window.innerHeight - 0.5) * 40);
+      rawX.set((event.clientX / window.innerWidth - 0.5) * 50);
+      rawY.set((event.clientY / window.innerHeight - 0.5) * 34);
     };
     window.addEventListener("mousemove", onMove, { passive: true });
     return () => window.removeEventListener("mousemove", onMove);
@@ -34,17 +35,20 @@ export default function Hero({ photo }: { photo: Photo | null }) {
     });
   };
 
+  const meta = [eventConfig.date, eventConfig.location].filter(Boolean).join(" · ");
+
   return (
-    <section className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden px-[22px] pb-12">
-      <div className="absolute inset-0 bg-ink-soft">
+    <section className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden px-[22px] pb-12 pt-28">
+      {/* Foto de fundo, bem apagada: o protagonista é o dourado */}
+      <div className="absolute inset-0 bg-navy">
         {photo && (
-          <Image
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
             src={photo.previewUrl}
-            alt={`${eventConfig.name} — abertura do evento`}
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover opacity-70"
+            alt=""
+            aria-hidden="true"
+            className="h-full w-full object-cover opacity-40 saturate-[0.7]"
+            fetchPriority="high"
           />
         )}
       </div>
@@ -52,81 +56,105 @@ export default function Hero({ photo }: { photo: Photo | null }) {
       <motion.div
         aria-hidden="true"
         style={{ x, y }}
-        className="animate-glow absolute left-1/2 top-[8%] -ml-[360px] h-[min(90vw,720px)] w-[min(90vw,720px)] rounded-full bg-[radial-gradient(circle,rgba(139,92,246,0.42),rgba(139,92,246,0)_66%)] blur-[30px]"
+        className="animate-glow absolute left-1/2 top-[6%] -ml-[340px] h-[min(92vw,680px)] w-[min(92vw,680px)] rounded-full bg-[radial-gradient(circle,rgba(212,175,55,0.28),rgba(212,175,55,0)_66%)] blur-[26px]"
       />
 
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-[linear-gradient(180deg,rgba(5,5,9,0.72)_0%,rgba(5,5,9,0.25)_38%,rgba(5,5,9,0.86)_76%,#050509_100%)]"
+        className="absolute inset-0 bg-[linear-gradient(180deg,rgba(4,6,14,0.88)_0%,rgba(8,18,39,0.55)_38%,rgba(4,6,14,0.9)_78%,#04060e_100%)]"
       />
 
-      <div className="relative mx-auto flex w-full max-w-[1180px] flex-col gap-6">
+      <div className="relative z-[2] mx-auto flex w-full max-w-[1180px] flex-col items-center gap-7 text-center">
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 1.1, ease: EASE, delay: 0.15 }}
+          className="w-[min(46vw,210px)] drop-shadow-[0_0_40px_rgba(212,175,55,0.22)]"
+        >
+          <EventSeal className="h-auto w-full" />
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, ease: EASE, delay: 0.2 }}
+          transition={{ duration: 0.8, ease: EASE, delay: 0.35 }}
           className="flex items-center gap-3"
         >
-          <span className="h-px w-6 bg-violet" />
-          <span className="font-[family-name:var(--font-plex)] text-[10px] tracking-[0.24em] text-muted">
+          <span className="h-px w-6 bg-gold/60" />
+          <span className="font-[family-name:var(--font-mono)] text-[9px] tracking-[0.24em] text-gold/85 sm:text-[10px]">
             {eventConfig.hero.kicker}
           </span>
+          <span className="h-px w-6 bg-gold/60" />
         </motion.div>
 
         <motion.h1
-          initial={{ opacity: 0, y: 30 }}
+          initial={{ opacity: 0, y: 26 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 1, ease: EASE, delay: 0.35 }}
-          className="m-0 text-[clamp(58px,17vw,190px)] font-semibold leading-[0.88] tracking-[-0.03em]"
+          transition={{ duration: 1, ease: EASE, delay: 0.45 }}
+          className="m-0 flex flex-col items-center gap-1"
         >
-          CONEXÕES
-          <br />
-          <span className="text-transparent [-webkit-text-stroke:1px_rgba(255,255,255,0.55)]">
-            B2B
+          <span className="text-[clamp(15px,4.6vw,30px)] font-semibold tracking-[0.34em] text-white/90">
+            {eventConfig.hero.titleTop}
+          </span>
+          <span className="text-gold-gradient text-[clamp(34px,10.5vw,118px)] font-extrabold leading-[0.92] tracking-[-0.02em]">
+            {eventConfig.hero.titleMain}
           </span>
         </motion.h1>
 
         <motion.p
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.9, ease: EASE, delay: 0.62 }}
-          className="m-0 max-w-[520px] text-[clamp(17px,4.4vw,26px)] leading-[1.25] tracking-[-0.01em] text-pretty"
-        >
-          {eventConfig.hero.headline}
-        </motion.p>
-
-        <motion.p
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.9, ease: EASE, delay: 0.78 }}
-          className="m-0 max-w-[430px] text-sm leading-relaxed text-muted text-pretty"
+          transition={{ duration: 0.9, ease: EASE, delay: 0.66 }}
+          className="m-0 max-w-[560px] text-[clamp(15px,3.6vw,20px)] leading-[1.45] text-white/85 text-pretty"
         >
-          {eventConfig.hero.subheadline}
+          {eventConfig.hero.headline}{" "}
+          <span className="text-muted">{eventConfig.hero.subheadline}</span>
         </motion.p>
+
+        {meta && (
+          <motion.span
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.9, ease: EASE, delay: 0.78 }}
+            className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.2em] text-muted"
+          >
+            {meta.toUpperCase()}
+          </motion.span>
+        )}
 
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.9, ease: EASE, delay: 0.95 }}
-          className="flex flex-wrap items-center gap-5"
+          transition={{ duration: 0.9, ease: EASE, delay: 0.88 }}
+          className="flex flex-col items-center gap-6"
         >
           <button
             type="button"
             onClick={scrollToAlbums}
             data-cursor="→"
-            aria-label="Explorar fotos do evento"
-            className="min-h-[52px] rounded-full border border-violet-bright/45 bg-violet/10 px-8 text-xs font-semibold tracking-[0.2em] transition-all duration-300 hover:-translate-y-0.5 hover:border-violet-bright hover:bg-violet/25"
+            aria-label="Ver as fotos do evento"
+            className="gold-sheen gold-border min-h-[54px] rounded-full bg-gradient-to-b from-gold/20 to-gold/5 px-9 text-[11px] font-bold tracking-[0.22em] text-gold-bright transition-all duration-300 hover:-translate-y-0.5 hover:border-gold-bright/70 hover:text-white"
           >
             {eventConfig.hero.cta}
           </button>
-          <span className="flex flex-col items-center gap-1.5 text-[#5b5768]">
-            <span className="font-[family-name:var(--font-plex)] text-[9px] tracking-[0.2em]">
-              SCROLL
+
+          <span className="flex flex-col items-center gap-1.5 text-[#57618a]">
+            <span className="font-[family-name:var(--font-mono)] text-[9px] tracking-[0.2em]">
+              ROLE
             </span>
-            <span className="animate-bob block h-6 w-px bg-gradient-to-b from-violet to-transparent" />
+            <span className="animate-bob block h-6 w-px bg-gradient-to-b from-gold to-transparent" />
           </span>
         </motion.div>
       </div>
+
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 1, ease: EASE, delay: 1.1 }}
+        className="relative z-[2] mx-auto mt-10 w-full max-w-[1180px] border-t border-gold/12 pt-7"
+      >
+        <PartnerRow />
+      </motion.div>
     </section>
   );
 }

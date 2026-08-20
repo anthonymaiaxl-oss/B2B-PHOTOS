@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { useRef } from "react";
 import type { Photo } from "@/types";
@@ -11,14 +10,12 @@ export default function ParallaxImage({
   alt,
   depth = 0.12,
   className = "",
-  sizes = "(max-width: 768px) 100vw, 1180px",
   priority = false,
 }: {
   photo: Photo | null;
   alt: string;
   depth?: number;
   className?: string;
-  sizes?: string;
   priority?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -30,16 +27,16 @@ export default function ParallaxImage({
   const y = useTransform(scrollYProgress, [0, 1], [`-${shift}px`, `${shift}px`]);
 
   return (
-    <div ref={ref} className={`relative overflow-hidden bg-ink-soft ${className}`}>
+    <div ref={ref} className={`relative overflow-hidden bg-navy ${className}`}>
       <motion.div style={{ y }} className="absolute inset-[-12%]">
         {photo && (
-          <Image
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
             src={photo.thumbnailUrl}
             alt={alt}
-            fill
-            priority={priority}
-            sizes={sizes}
-            className="object-cover"
+            loading={priority ? "eager" : "lazy"}
+            decoding="async"
+            className="h-full w-full object-cover"
           />
         )}
       </motion.div>

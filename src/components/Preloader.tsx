@@ -40,16 +40,16 @@ export default function Preloader() {
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, ease: EASE }}
-            className="text-[13px] font-medium tracking-[0.42em]"
+            className="text-gold-gradient text-[13px] font-bold tracking-[0.42em]"
           >
-            {eventConfig.name.toUpperCase()}
+            {eventConfig.brand.toUpperCase()}
           </motion.span>
-          <span className="h-px w-[140px] overflow-hidden bg-[#1c1a25]">
+          <span className="h-px w-[150px] overflow-hidden bg-[#141d33]">
             <motion.span
               initial={{ scaleX: 0 }}
               animate={{ scaleX: 1 }}
               transition={{ duration: 0.9, ease: EASE }}
-              className="block h-px origin-left bg-gradient-to-r from-violet to-violet-bright"
+              className="block h-px origin-left bg-gradient-to-r from-gold-deep via-gold to-gold-bright"
             />
           </span>
         </motion.div>

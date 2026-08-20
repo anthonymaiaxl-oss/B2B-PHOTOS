@@ -1,13 +1,21 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: #050509;
-  --color-ink-soft: #0b0b12;
-  --color-line: #14121c;
-  --color-violet: #8b5cf6;
-  --color-violet-bright: #a855f7;
-  --color-muted: #a1a1aa;
-  --font-display: "Space Grotesk", Helvetica, sans-serif;
+  /* Preto azulado da arte do evento */
+  --color-ink: #04060e;
+  --color-navy: #081227;
+  --color-navy-soft: #0d1c3d;
+  --color-panel: #0a1226;
+
+  /* Dourado do selo: claro no topo, queimado embaixo */
+  --color-gold: #d4af37;
+  --color-gold-bright: #f6e3a1;
+  --color-gold-deep: #8a6a1c;
+
+  --color-muted: #98a2ba;
+  --color-line: #1b2745;
+
+  --font-display: "Montserrat", Helvetica, Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --ease-premium: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -17,7 +25,7 @@ body {
   margin: 0;
   padding: 0;
   background: var(--color-ink);
-  color: #fff;
+  color: #f4f1e8;
   overflow-x: hidden;
 }
 
@@ -27,14 +35,85 @@ body {
 }
 
 ::selection {
-  background: var(--color-violet);
-  color: #fff;
+  background: var(--color-gold);
+  color: #04060e;
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-violet-bright);
+  outline: 2px solid var(--color-gold-bright);
   outline-offset: 3px;
 }
+
+/* ---------------------------------------------------------- ouro utilitário */
+
+/* Texto com o degradê do selo (claro → dourado → queimado). */
+.text-gold-gradient {
+  background: linear-gradient(
+    180deg,
+    #fdf3cf 0%,
+    var(--color-gold-bright) 24%,
+    var(--color-gold) 56%,
+    var(--color-gold-deep) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Filete horizontal que acende no centro. */
+.gold-rule {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(212, 175, 55, 0.55) 30%,
+    rgba(246, 227, 161, 0.85) 50%,
+    rgba(212, 175, 55, 0.55) 70%,
+    transparent
+  );
+}
+
+.gold-border {
+  border: 1px solid rgba(212, 175, 55, 0.26);
+}
+
+/* Brilho que corre pela superfície ao passar o mouse. */
+.gold-sheen {
+  position: relative;
+  overflow: hidden;
+}
+
+.gold-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(246, 227, 161, 0.16) 50%,
+    transparent 62%
+  );
+  transform: translateX(-120%);
+  transition: transform 900ms var(--ease-premium);
+  pointer-events: none;
+}
+
+.gold-sheen:hover::after {
+  transform: translateX(120%);
+}
+
+/* Grão: tira o aspecto "gradiente de CSS" do fundo escuro. */
+.grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* --------------------------------------------------------------- animações */
 
 @keyframes bob {
   0%,
@@ -49,10 +128,25 @@ body {
 @keyframes glow-pulse {
   0%,
   100% {
-    opacity: 0.55;
+    opacity: 0.5;
   }
   50% {
-    opacity: 0.9;
+    opacity: 0.85;
+  }
+}
+
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -180% 0;
+  }
+  100% {
+    background-position: 180% 0;
   }
 }
 
@@ -62,6 +156,15 @@ body {
 
 .animate-glow {
   animation: glow-pulse 7s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 46s linear infinite;
+}
+
+.animate-shimmer {
+  background-size: 220% 100%;
+  animation: shimmer 2.4s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
