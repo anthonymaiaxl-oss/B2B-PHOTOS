@@ -78,6 +78,30 @@ export const eventConfig: EventConfig = {
     { id: "encerramento", name: "Encerramento", caption: "Certificados e brinde", folderId: "" },
   ],
 
+  /**
+   * IMAGENS FIXAS DAS SEÇÕES
+   *
+   * Coloque os arquivos em `public/secoes/` e escreva o caminho aqui começando
+   * com "/" (o `public/` não entra no caminho). Exemplo:
+   *
+   *     hero: "/secoes/hero.jpg",
+   *
+   * Campo vazio ("") = a seção volta ao comportamento dinâmico e usa uma foto
+   * real do álbum no Drive. É de propósito: assim que as fotos verdadeiras do
+   * evento estiverem no ar, basta apagar o caminho para o site passar a mostrar
+   * o registro real em vez de uma imagem ilustrativa.
+   *
+   * Tamanho recomendado: 1920×1080 (16:9), JPG de qualidade 80, até ~350 KB.
+   * Imagens muito maiores só deixam o site lento — elas ficam atrás de uma
+   * camada escura e de tipografia grande.
+   */
+  sectionImages: {
+    hero: "",
+    // ordem: 01 CONHECIMENTO, 02 NETWORKING, 03 ESTRATÉGIA, 04 MOMENTOS
+    story: ["", "", "", ""],
+    cta: "",
+  },
+
   finalCta: {
     lineOne: "OS MOMENTOS PASSAM.",
     lineTwo: "AS CONEXÕES FICAM.",

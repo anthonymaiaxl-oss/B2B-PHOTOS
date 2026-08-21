@@ -19,7 +19,13 @@ export default function CTASection({
 
   return (
     <section className="relative flex min-h-[82svh] items-center overflow-hidden px-[22px]">
-      <ParallaxImage photo={photo} alt="" depth={0.14} className="absolute inset-0" />
+      <ParallaxImage
+        photo={photo}
+        src={eventConfig.sectionImages.cta || undefined}
+        alt=""
+        depth={0.14}
+        className="absolute inset-0"
+      />
       <span
         aria-hidden="true"
         className="absolute inset-0 bg-[linear-gradient(180deg,#04060e,rgba(8,18,39,0.55)_45%,#04060e)]"

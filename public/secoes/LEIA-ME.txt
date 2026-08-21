@@ -1,0 +1,25 @@
+IMAGENS FIXAS DAS SEÇÕES
+========================
+
+Coloque aqui os arquivos e depois escreva o caminho em src/config/event.ts,
+no bloco `sectionImages`. O "public/" NÃO entra no caminho:
+
+    arquivo:  public/secoes/hero.jpg
+    caminho:  "/secoes/hero.jpg"
+
+Nomes sugeridos (só sugestão — o que vale é o caminho no event.ts):
+
+    hero.jpg          fundo do topo da home
+    conhecimento.jpg  seção 01
+    networking.jpg    seção 02
+    estrategia.jpg    seção 03
+    momentos.jpg      seção 04
+    cta.jpg           fundo do bloco final
+
+Formato: JPG, 1920x1080 (16:9), qualidade 80, até ~350 KB cada.
+Não use imagens gigantes: elas ficam atrás de uma camada escura e de
+tipografia grande, então resolução extra só deixa o site lento.
+
+Deixar o campo vazio ("") em event.ts faz a seção voltar a usar uma foto real
+do álbum no Drive. Quando as fotos do evento estiverem no ar, apagar o caminho
+é o suficiente para o site passar a mostrar o registro verdadeiro.

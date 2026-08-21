@@ -59,6 +59,7 @@ export default function ScrollStory({ albums }: { albums: AlbumWithPhotos[] }) {
 
                 <ParallaxImage
                   photo={photo}
+                  src={eventConfig.sectionImages.story[index] || undefined}
                   alt={`${chapter.word} — ${eventConfig.name}`}
                   depth={0.1 + index * 0.02}
                   className={`aspect-[4/3] w-full rounded-[4px] border border-gold/12 md:col-span-8 md:aspect-[16/9] ${

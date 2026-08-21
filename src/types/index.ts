@@ -68,6 +68,16 @@ export interface EventConfig {
   albumCaptions: Record<string, string>;
   /** Álbuns exibidos quando o Drive ainda não está conectado (modo demonstração). */
   demoAlbums: Album[];
+  /**
+   * Imagens fixas das seções, servidas de `public/`.
+   * Campo vazio = a seção volta a usar uma foto real do Drive.
+   */
+  sectionImages: {
+    hero: string;
+    /** Uma por capítulo, na ordem 01, 02, 03, 04. */
+    story: string[];
+    cta: string;
+  };
   /** Bloco de fechamento da home. */
   finalCta: {
     lineOne: string;

@@ -11,12 +11,15 @@ export default function ParallaxImage({
   depth = 0.12,
   className = "",
   priority = false,
+  src,
 }: {
   photo: Photo | null;
   alt: string;
   depth?: number;
   className?: string;
   priority?: boolean;
+  /** Imagem fixa de `public/`. Quando presente, tem prioridade sobre `photo`. */
+  src?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({
@@ -26,13 +29,15 @@ export default function ParallaxImage({
   const shift = 100 * depth;
   const y = useTransform(scrollYProgress, [0, 1], [`-${shift}px`, `${shift}px`]);
 
+  const source = src || photo?.thumbnailUrl;
+
   return (
     <div ref={ref} className={`relative overflow-hidden bg-navy ${className}`}>
       <motion.div style={{ y }} className="absolute inset-[-12%]">
-        {photo && (
+        {source && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={photo.thumbnailUrl}
+            src={source}
             alt={alt}
             loading={priority ? "eager" : "lazy"}
             decoding="async"

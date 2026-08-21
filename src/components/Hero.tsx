@@ -39,11 +39,14 @@ export default function Hero({ photo }: { photo: Photo | null }) {
 
   const meta = [eventConfig.date, eventConfig.location].filter(Boolean).join(" · ");
 
+  // Imagem fixa de `public/` quando configurada; senão, a capa real do Drive.
+  const heroImage = eventConfig.sectionImages.hero || photo?.previewUrl;
+
   return (
     <section className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden px-[22px] pb-12 pt-24 sm:pt-28">
       {/* ---------------------------------------------------- fotografia de fundo */}
       <div className="absolute inset-0 bg-navy">
-        {photo && (
+        {heroImage && (
           <motion.div
             className="h-full w-full"
             initial={{ scale: 1.06 }}
@@ -54,7 +57,7 @@ export default function Hero({ photo }: { photo: Photo | null }) {
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={photo.previewUrl}
+              src={heroImage}
               alt=""
               aria-hidden="true"
               className="h-full w-full object-cover opacity-[0.34] saturate-[0.65]"
