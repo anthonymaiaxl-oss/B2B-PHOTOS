@@ -1,6 +1,6 @@
 import { guardAdmin } from "@/lib/admin-auth";
 import { MAX_UPLOAD_BYTES, validateUpload } from "@/config/uploads";
-import { createResumableSession } from "@/lib/drive";
+import { createResumableSession, findDuplicateInFolder } from "@/lib/drive";
 import { isDriveConfigured } from "@/lib/google-auth";
 
 export const runtime = "nodejs";
@@ -45,6 +45,20 @@ export async function POST(request: Request) {
   }
 
   try {
+    // TRAVA DEFINITIVA CONTRA DUPLICAÇÃO.
+    //
+    // Se o Drive já tem um arquivo com este nome e este tamanho nesta pasta,
+    // não abrimos sessão nenhuma. Isso cobre o caso que estava duplicando as
+    // fotos: o envio direto chega ao Google, a resposta se perde no caminho,
+    // o navegador entende que falhou e reenvia pelo caminho reserva. Do lado
+    // do cliente é impossível distinguir com segurança; aqui é uma pergunta
+    // simples para a fonte da verdade.
+    const existing = await findDuplicateInFolder(folderId, name, size);
+    if (existing) {
+      console.info("[admin/upload-session] já existe, envio ignorado:", name);
+      return Response.json({ duplicate: true, fileId: existing.id });
+    }
+
     const uploadUrl = await createResumableSession({ name, mimeType, size, folderId });
     return Response.json({ uploadUrl });
   } catch (error) {

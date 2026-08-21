@@ -25,11 +25,17 @@
  *   308     → incompleto. Aí sim vale o caminho reserva.
  * ------------------------------------------------------------------------
  */
+export interface UploadResult {
+  viaFallback: boolean;
+  /** true = o arquivo já estava no álbum e nada foi enviado. */
+  duplicate: boolean;
+}
+
 export async function uploadToDrive(
   blob: Blob,
   options: { name: string; mimeType: string; folderId: string },
   onProgress: (fraction: number) => void,
-): Promise<{ viaFallback: boolean }> {
+): Promise<UploadResult> {
   const sessionResponse = await fetch("/api/admin/upload-session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -46,24 +52,37 @@ export async function uploadToDrive(
     throw new Error(data.error ?? "Não foi possível iniciar o envio.");
   }
 
-  const { uploadUrl } = (await sessionResponse.json()) as { uploadUrl: string };
+  const session = (await sessionResponse.json()) as {
+    uploadUrl?: string;
+    duplicate?: boolean;
+  };
+
+  // O servidor já encontrou este arquivo na pasta: nada a enviar.
+  if (session.duplicate || !session.uploadUrl) {
+    onProgress(1);
+    return { viaFallback: false, duplicate: true };
+  }
+
+  const uploadUrl = session.uploadUrl;
 
   try {
     await putWithProgress(uploadUrl, blob, options.mimeType, onProgress);
-    return { viaFallback: false };
+    return { viaFallback: false, duplicate: false };
   } catch (error) {
     console.warn("[upload] envio direto falhou", error);
 
-    // Antes de reenviar: o Google chegou a guardar o arquivo?
+    // Primeira verificação (barata): o Google chegou a guardar o arquivo?
     const status = await queryResumableStatus(uploadUrl, blob.size);
     if (status === "completo") {
       console.info("[upload] o arquivo já estava no Drive — reenvio cancelado", options.name);
       onProgress(1);
-      return { viaFallback: false };
+      return { viaFallback: false, duplicate: false };
     }
 
-    await uploadViaServer(blob, options, onProgress);
-    return { viaFallback: true };
+    // Se a consulta não foi conclusiva, o caminho reserva ainda é seguro: a
+    // rota /api/admin/upload pergunta ao Drive antes de escrever e recusa
+    // criar uma segunda cópia.
+    return uploadViaServer(blob, options, onProgress);
   }
 }
 
@@ -127,7 +146,7 @@ async function uploadViaServer(
   blob: Blob,
   options: { name: string; mimeType: string; folderId: string },
   onProgress: (fraction: number) => void,
-): Promise<void> {
+): Promise<UploadResult> {
   const form = new FormData();
   form.append("file", new File([blob], options.name, { type: options.mimeType }));
   form.append("name", options.name);
@@ -135,9 +154,10 @@ async function uploadViaServer(
 
   onProgress(0.15);
   const response = await fetch("/api/admin/upload", { method: "POST", body: form });
+  const data = await response.json().catch(() => ({}) as { error?: string; duplicate?: boolean });
   if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
     throw new Error(data.error ?? "Falha no envio.");
   }
   onProgress(1);
+  return { viaFallback: true, duplicate: Boolean(data.duplicate) };
 }

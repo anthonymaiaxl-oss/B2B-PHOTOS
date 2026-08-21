@@ -1,6 +1,6 @@
 import { guardAdmin } from "@/lib/admin-auth";
 import { MAX_FALLBACK_BYTES, validateUpload } from "@/config/uploads";
-import { uploadMultipart } from "@/lib/drive";
+import { findDuplicateInFolder, uploadMultipart } from "@/lib/drive";
 import { isDriveConfigured } from "@/lib/google-auth";
 
 export const runtime = "nodejs";
@@ -51,6 +51,14 @@ export async function POST(request: Request) {
   }
 
   try {
+    // Mesma trava da rota de sessão. Este caminho é justamente o que criava a
+    // segunda cópia, então ele precisa checar antes de escrever.
+    const existing = await findDuplicateInFolder(folderId, name, file.size);
+    if (existing) {
+      console.info("[admin/upload] já existe, envio ignorado:", name);
+      return Response.json({ ok: true, duplicate: true, file: existing });
+    }
+
     const created = await uploadMultipart({
       name,
       mimeType: file.type || "application/octet-stream",

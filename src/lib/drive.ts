@@ -355,6 +355,46 @@ export async function listFolderFiles(
   return files;
 }
 
+/**
+ * Procura um arquivo com este nome exato dentro da pasta.
+ *
+ * É a trava definitiva contra duplicação. Todas as outras (trava de clique,
+ * deduplicação da fila, consulta da sessão resumível) são no navegador, e
+ * navegador erra: conexão cai depois do último byte, aba dorme no celular, o
+ * XHR reporta falha para um envio que na verdade deu certo. Quando isso
+ * acontece, o caminho reserva sobe o arquivo de novo e nasce a segunda cópia.
+ *
+ * Aqui a pergunta é feita à fonte da verdade — o próprio Drive — antes de
+ * qualquer byte ser enviado. Se já existe, não envia.
+ *
+ * A comparação usa nome E tamanho. Só nome bloquearia duas fotos diferentes
+ * chamadas IMG_0001.jpg vindas de câmeras diferentes; nome + tamanho idêntico
+ * ao byte é, na prática, o mesmo arquivo.
+ */
+export async function findDuplicateInFolder(
+  folderId: string,
+  name: string,
+  size: number,
+): Promise<{ id: string; name: string } | null> {
+  const params = new URLSearchParams({
+    q: [
+      `"${folderId}" in parents`,
+      `name = "${escapeQueryValue(name)}"`,
+      "trashed = false",
+    ].join(" and "),
+    fields: "files(id,name,size)",
+    pageSize: "20",
+    ...SHARED_DRIVE_PARAMS,
+  });
+
+  const data = await driveJson<{ files?: { id: string; name: string; size?: string }[] }>(
+    `${API}/files?${params}`,
+  );
+
+  const match = (data.files ?? []).find((file) => Number(file.size ?? -1) === size);
+  return match ? { id: match.id, name: match.name } : null;
+}
+
 /** Manda para a lixeira (reversível) em vez de apagar de vez. */
 export async function trashFile(fileId: string): Promise<void> {
   const params = new URLSearchParams({ fields: "id", ...SHARED_DRIVE_PARAMS });

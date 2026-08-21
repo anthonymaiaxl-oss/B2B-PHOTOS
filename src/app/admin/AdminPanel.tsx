@@ -81,6 +81,8 @@ interface QueueItem {
   finalSize?: number;
   thumbUrl?: string | null;
   convertedFromHeic?: boolean;
+  /** O arquivo já existia na pasta e não foi reenviado. */
+  duplicate?: boolean;
 }
 
 interface AdminFile {
@@ -426,7 +428,7 @@ export default function AdminPanel() {
 
         patch(key, { state: "enviando", convertedFromHeic: prepared.convertedFromHeic });
 
-        await uploadToDrive(
+        const result = await uploadToDrive(
           prepared.blob,
           { name: prepared.name, mimeType: prepared.mimeType, folderId },
           (fraction) => patch(key, { progress: fraction }),
@@ -453,7 +455,12 @@ export default function AdminPanel() {
           }
         }
 
-        patch(key, { state: "concluido", progress: 1, finalSize: prepared.blob.size });
+        patch(key, {
+          state: "concluido",
+          progress: 1,
+          finalSize: prepared.blob.size,
+          duplicate: result.duplicate,
+        });
         return true;
       } catch (caught) {
         patch(key, {
@@ -776,7 +783,7 @@ export default function AdminPanel() {
                 </label>
                 <label
                   className="flex cursor-pointer items-center gap-2.5 text-[13px] text-muted"
-                  title="O .HEIC original vai para a subpasta _originais do álbum. Ocupa cota extra no Drive."
+                  title="Além do JPEG que aparece na galeria, guarda o arquivo .HEIC original numa subpasta _originais. São dois arquivos por foto e o dobro de cota no Drive."
                 >
                   <input
                     type="checkbox"
@@ -784,7 +791,7 @@ export default function AdminPanel() {
                     onChange={(event) => setKeepOriginals(event.target.checked)}
                     className="h-4 w-4 accent-[#d4af37]"
                   />
-                  Guardar HEIC original
+                  Guardar HEIC original (2ª cópia)
                 </label>
               </div>
             </div>
@@ -978,6 +985,12 @@ export default function AdminPanel() {
                           >
                             {STATE_LABEL[item.state]}
                           </span>
+                          {item.duplicate && item.state === "concluido" && (
+                            <>
+                              <span aria-hidden="true">•</span>
+                              <span className="text-gold/60">Já estava no álbum</span>
+                            </>
+                          )}
                           {item.convertedFromHeic && item.state === "concluido" && (
                             <>
                               <span aria-hidden="true">•</span>
