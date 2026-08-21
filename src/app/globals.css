@@ -102,6 +102,18 @@ body {
   transform: translateX(120%);
 }
 
+/* Vinheta: escurece as bordas e empurra o olho para o centro. É o que separa
+   "foto com um gradiente por cima" de "quadro de cinema". */
+.vignette {
+  pointer-events: none;
+  background: radial-gradient(
+    120% 90% at 50% 42%,
+    transparent 44%,
+    rgba(4, 6, 14, 0.5) 76%,
+    rgba(4, 6, 14, 0.88) 100%
+  );
+}
+
 /* Grão: tira o aspecto "gradiente de CSS" do fundo escuro. */
 .grain::before {
   content: "";
@@ -165,6 +177,21 @@ body {
 .animate-shimmer {
   background-size: 220% 100%;
   animation: shimmer 2.4s linear infinite;
+}
+
+/* No celular o orçamento de GPU é outro: os efeitos contínuos (brilho pulsante
+   e selo girando) saem, e o que fica são as transições pontuais de toque e o
+   reveal no scroll. A identidade continua a mesma; só não há animação rodando
+   o tempo todo atrás do conteúdo. */
+@media (max-width: 640px) {
+  .animate-glow {
+    animation: none;
+    opacity: 0.55;
+  }
+
+  .animate-spin-slow {
+    animation-duration: 90s;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,0 +1,2594 @@
+diff --git a/package.json b/package.json
+index 1aed45b..0a81405 100644
+--- a/package.json
++++ b/package.json
+@@ -10,6 +10,7 @@
+   },
+   "dependencies": {
+     "framer-motion": "^11.18.2",
++    "heic2any": "^0.0.4",
+     "jszip": "^3.10.1",
+     "lucide-react": "^0.462.0",
+     "next": "^15.5.4",
+diff --git a/src/app/admin/AdminPanel.tsx b/src/app/admin/AdminPanel.tsx
+index 40c11ab..be380e0 100644
+--- a/src/app/admin/AdminPanel.tsx
++++ b/src/app/admin/AdminPanel.tsx
+@@ -6,22 +6,44 @@ import {
+   Check,
+   CloudUpload,
+   ExternalLink,
++  FileText,
++  Film,
+   FolderPlus,
+   HardDrive,
+   Loader2,
+   LogOut,
+   RefreshCw,
++  RotateCcw,
+   Trash2,
+   X,
+ } from "lucide-react";
+ import { useRouter } from "next/navigation";
++import {
++  ACCEPT_ATTRIBUTE,
++  MAX_UPLOAD_BYTES,
++  kindOf,
++  labelOf,
++  primaryMimeFor,
++  validateUpload,
++  type FileKind,
++} from "@/config/uploads";
+ import { formatBytes } from "@/lib/format";
+-import { optimizeImage } from "@/lib/optimize-image";
++import { prepareUpload } from "@/lib/prepare-upload";
++import { makeThumbnail, releaseThumbnail } from "@/lib/thumbnail";
+ import { uploadToDrive } from "@/lib/upload-client";
+ 
+ /** Envios simultâneos. Mais que isso e o navegador começa a enfileirar sozinho. */
+ const CONCURRENCY = 3;
+ 
++/**
++ * Miniaturas geradas por seleção. Acima disso os itens mostram só o bloco com
++ * a extensão: com 300 fotos na fila, gerar 300 miniaturas trava a interface e
++ * o ganho visual é nenhum (ninguém rola 300 linhas conferindo thumbnail).
++ */
++const THUMBNAIL_BUDGET = 80;
++/** Miniaturas geradas em paralelo. Duas já saturam o decodificador. */
++const THUMBNAIL_CONCURRENCY = 2;
++
+ interface AlbumRow {
+   id: string;
+   name: string;
+@@ -38,22 +60,35 @@ interface Status {
+   quota: { limit: number | null; usage: number; usageInDrive: number } | null;
+ }
+ 
+-type ItemState = "aguardando" | "otimizando" | "enviando" | "pronto" | "erro";
++type ItemState = "aguardando" | "convertendo" | "enviando" | "concluido" | "erro";
++
++const STATE_LABEL: Record<ItemState, string> = {
++  aguardando: "Aguardando",
++  convertendo: "Convertendo…",
++  enviando: "Enviando…",
++  concluido: "Concluído",
++  erro: "Erro",
++};
+ 
+ interface QueueItem {
+   key: string;
+   file: File;
++  kind: FileKind;
++  label: string;
+   progress: number;
+   state: ItemState;
+   error?: string;
+   finalSize?: number;
++  thumbUrl?: string | null;
++  convertedFromHeic?: boolean;
+ }
+ 
+-interface AdminPhoto {
++interface AdminFile {
+   id: string;
+   name: string;
+   size: number;
+-  thumbnailUrl: string;
++  kind: FileKind;
++  thumbnailUrl: string | null;
+ }
+ 
+ export default function AdminPanel() {
+@@ -63,22 +98,65 @@ export default function AdminPanel() {
+   const [status, setStatus] = useState<Status | null>(null);
+   const [albums, setAlbums] = useState<AlbumRow[]>([]);
+   const [albumId, setAlbumId] = useState("");
+-  const [photos, setPhotos] = useState<AdminPhoto[]>([]);
++  const [files, setFiles] = useState<AdminFile[]>([]);
+   const [queue, setQueue] = useState<QueueItem[]>([]);
+   const [optimize, setOptimize] = useState(true);
++  const [keepOriginals, setKeepOriginals] = useState(true);
+   const [newAlbum, setNewAlbum] = useState("");
+   const [busy, setBusy] = useState<string | null>(null);
+   const [notice, setNotice] = useState<string | null>(null);
+   const [error, setError] = useState<string | null>(null);
+   const [dragging, setDragging] = useState(false);
++  const [running, setRunning] = useState(false);
++
++  /** Espelho da fila para os workers lerem o estado atual sem closure velha. */
++  const queueRef = useRef<QueueItem[]>([]);
++  useEffect(() => {
++    queueRef.current = queue;
++  }, [queue]);
++
++  /** Todo object URL criado precisa ser revogado — aqui ficam os pendentes. */
++  const objectUrls = useRef<Set<string>>(new Set());
++  /** Id da subpasta `_originais` já resolvida, por álbum. */
++  const originalsCache = useRef<Map<string, string>>(new Map());
++  /** Evita contar entrada/saída de elementos filhos no drag and drop. */
++  const dragDepth = useRef(0);
++  const mounted = useRef(true);
++
++  useEffect(() => {
++    mounted.current = true;
++    const urls = objectUrls.current;
++    return () => {
++      mounted.current = false;
++      // Libera a memória das miniaturas ao sair do painel.
++      for (const url of urls) releaseThumbnail(url);
++      urls.clear();
++    };
++  }, []);
+ 
+   const album = useMemo(
+     () => albums.find((item) => item.folderId === albumId) ?? null,
+     [albums, albumId],
+   );
+-  const uploading = queue.some(
+-    (item) => item.state === "enviando" || item.state === "otimizando",
+-  );
++
++  const totals = useMemo(() => {
++    const total = queue.length;
++    const done = queue.filter((item) => item.state === "concluido").length;
++    const failed = queue.filter((item) => item.state === "erro").length;
++    const pending = queue.filter(
++      (item) => item.state === "aguardando" || item.state === "erro",
++    ).length;
++    // Progresso geral: item concluído vale 1, item com erro vale 0, o resto
++    // entra com a fração real de bytes já enviados.
++    const fraction = total
++      ? queue.reduce((sum, item) => {
++          if (item.state === "concluido") return sum + 1;
++          if (item.state === "erro") return sum;
++          return sum + item.progress;
++        }, 0) / total
++      : 0;
++    return { total, done, failed, pending, fraction };
++  }, [queue]);
+ 
+   /* ------------------------------------------------------------- carregamento */
+ 
+@@ -106,15 +184,15 @@ export default function AdminPanel() {
+     );
+   }, []);
+ 
+-  const loadPhotos = useCallback(async (folderId: string) => {
++  const loadFiles = useCallback(async (folderId: string) => {
+     if (!folderId) {
+-      setPhotos([]);
++      setFiles([]);
+       return;
+     }
+     const response = await fetch(`/api/admin/photos?folderId=${folderId}`);
+     if (!response.ok) return;
+-    const data = (await response.json()) as { photos?: AdminPhoto[] };
+-    setPhotos(data.photos ?? []);
++    const data = (await response.json()) as { photos?: AdminFile[] };
++    setFiles(data.photos ?? []);
+   }, []);
+ 
+   useEffect(() => {
+@@ -125,8 +203,8 @@ export default function AdminPanel() {
+   }, [loadStatus, loadAlbums]);
+ 
+   useEffect(() => {
+-    void loadPhotos(albumId);
+-  }, [albumId, loadPhotos]);
++    void loadFiles(albumId);
++  }, [albumId, loadFiles]);
+ 
+   /* ------------------------------------------------------------------- ações */
+ 
+@@ -173,102 +251,294 @@ export default function AdminPanel() {
+     }
+   };
+ 
+-  const patch = (key: string, changes: Partial<QueueItem>) =>
++  const patch = useCallback((key: string, changes: Partial<QueueItem>) => {
+     setQueue((current) =>
+       current.map((item) => (item.key === key ? { ...item, ...changes } : item)),
+     );
++  }, []);
+ 
+-  const addFiles = (files: FileList | File[]) => {
+-    const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
+-    if (images.length === 0) {
+-      setError("Selecione arquivos de imagem (JPG, PNG, HEIC…).");
+-      return;
++  /* -------------------------------------------------------------- miniaturas */
++
++  /**
++   * Gera as miniaturas em segundo plano, de poucas em poucas, para a seleção de
++   * dezenas de arquivos não travar a página.
++   */
++  const generateThumbnails = useCallback(async (keys: string[]) => {
++    let cursor = 0;
++    const worker = async () => {
++      while (cursor < keys.length) {
++        const key = keys[cursor++];
++        if (!mounted.current) return;
++        const item = queueRef.current.find((entry) => entry.key === key);
++        if (!item || item.thumbUrl !== undefined) continue;
++
++        const url = await makeThumbnail(item.file, item.kind);
++        if (!mounted.current) {
++          releaseThumbnail(url);
++          return;
++        }
++        if (url) objectUrls.current.add(url);
++        patch(key, { thumbUrl: url });
++      }
++    };
++    await Promise.all(Array.from({ length: THUMBNAIL_CONCURRENCY }, worker));
++  }, [patch]);
++
++  const dropThumbnail = (item: QueueItem) => {
++    if (item.thumbUrl) {
++      objectUrls.current.delete(item.thumbUrl);
++      releaseThumbnail(item.thumbUrl);
+     }
+-    setError(null);
+-    setQueue((current) => [
+-      ...current,
+-      ...images.map((file, index) => ({
+-        key: `${Date.now()}-${index}-${file.name}`,
+-        file,
+-        progress: 0,
+-        state: "aguardando" as ItemState,
+-      })),
+-    ]);
+   };
+ 
+-  const sendAll = async () => {
+-    if (!album || uploading) return;
+-    const pending = queue.filter(
+-      (item) => item.state === "aguardando" || item.state === "erro",
+-    );
+-    if (pending.length === 0) return;
++  /* ------------------------------------------------------------------- fila */
+ 
+-    setError(null);
+-    setNotice(null);
++  const addFiles = useCallback(
++    (incoming: FileList | File[]) => {
++      const list = Array.from(incoming);
++      if (list.length === 0) return;
+ 
+-    let cursor = 0;
+-    const worker = async () => {
+-      while (cursor < pending.length) {
+-        const item = pending[cursor++];
+-        try {
+-          patch(item.key, { state: "otimizando", progress: 0, error: undefined });
+-
+-          const original = {
+-            blob: item.file as Blob,
+-            name: item.file.name,
+-            mimeType: item.file.type,
+-            originalSize: item.file.size,
+-          };
+-
+-          let prepared = original;
+-          if (optimize) {
+-            try {
+-              prepared = await optimizeImage(item.file);
+-            } catch (caught) {
+-              // Formato que o navegador não decodifica (HEIC do iPhone, por
+-              // exemplo): envia o arquivo como veio em vez de perder a foto.
+-              console.warn("[upload] otimização indisponível", item.file.name, caught);
++      const existing = new Set(
++        queueRef.current.map((item) => `${item.file.name}:${item.file.size}`),
++      );
++
++      const accepted: QueueItem[] = [];
++      const rejected: string[] = [];
++      let duplicates = 0;
++      const stamp = Date.now();
++      // Quantas miniaturas ainda cabem no orçamento, contando o que já está na fila.
++      const room = Math.max(0, THUMBNAIL_BUDGET - queueRef.current.length);
++
++      list.forEach((file, index) => {
++        const signature = `${file.name}:${file.size}`;
++        if (existing.has(signature)) {
++          duplicates += 1;
++          return;
++        }
++
++        const check = validateUpload(file.name, file.type, file.size, MAX_UPLOAD_BYTES);
++        if (!check.ok) {
++          rejected.push(`${file.name} — ${check.reason}`);
++          return;
++        }
++
++        existing.add(signature);
++        accepted.push({
++          key: `${stamp}-${index}-${file.name}`,
++          file,
++          kind: check.kind ?? kindOf(file.name) ?? "documento",
++          label: labelOf(file.name),
++          progress: 0,
++          state: "aguardando",
++          // undefined = miniatura ainda não tentada; null = não terá miniatura.
++          thumbUrl: accepted.length < room ? undefined : null,
++        });
++      });
++
++      if (accepted.length > 0) {
++        setQueue((current) => [...current, ...accepted]);
++
++        const withThumbs = accepted
++          .filter((item) => item.thumbUrl === undefined)
++          .map((item) => item.key);
++        if (withThumbs.length > 0) {
++          // Sem await: a fila já aparece na tela e as miniaturas vão chegando.
++          void generateThumbnails(withThumbs);
++        }
++      }
++
++      const problems: string[] = [];
++      if (rejected.length > 0) {
++        problems.push(
++          rejected.length === 1
++            ? rejected[0]
++            : `${rejected.length} arquivos recusados — ${rejected.slice(0, 2).join("; ")}${
++                rejected.length > 2 ? "…" : ""
++              }`,
++        );
++      }
++      if (accepted.length === 0 && duplicates > 0) {
++        problems.push("Esses arquivos já estão na fila.");
++      }
++      setError(problems.length > 0 ? problems.join(" ") : null);
++    },
++    [generateThumbnails],
++  );
++
++  /** Resolve (uma vez por álbum) a subpasta onde o HEIC original é guardado. */
++  const ensureOriginalsFolder = useCallback(async (albumFolderId: string) => {
++    const cached = originalsCache.current.get(albumFolderId);
++    if (cached) return cached;
++
++    const response = await fetch("/api/admin/originals-folder", {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ albumFolderId }),
++    });
++    const data = await response.json();
++    if (!response.ok) throw new Error(data.error ?? "Falha ao preparar a pasta de originais.");
++
++    originalsCache.current.set(albumFolderId, data.folderId);
++    return data.folderId as string;
++  }, []);
++
++  const processItem = useCallback(
++    async (key: string, folderId: string): Promise<boolean> => {
++      const item = queueRef.current.find((entry) => entry.key === key);
++      if (!item) return false;
++
++      try {
++        // Vídeo e documento não passam por nenhum processamento: mostrar
++        // "Convertendo…" para eles seria mentira na tela.
++        patch(key, {
++          state: item.kind === "imagem" ? "convertendo" : "enviando",
++          progress: 0,
++          error: undefined,
++        });
++
++        const prepared = await prepareUpload(item.file, {
++          optimize,
++          keepHeicOriginal: keepOriginals,
++        });
++
++        // Depois da conversão o HEIC virou JPEG: agora dá para ter miniatura.
++        if (item.thumbUrl == null && prepared.kind === "imagem" && prepared.convertedFromHeic) {
++          const url = await makeThumbnail(prepared.blob, "imagem");
++          if (url) {
++            if (mounted.current) {
++              objectUrls.current.add(url);
++              patch(key, { thumbUrl: url });
++            } else {
++              releaseThumbnail(url);
+             }
+           }
++        }
++
++        patch(key, { state: "enviando", convertedFromHeic: prepared.convertedFromHeic });
+ 
+-          patch(item.key, { state: "enviando" });
+-          await uploadToDrive(
+-            prepared.blob,
+-            {
+-              name: prepared.name,
+-              mimeType: prepared.mimeType,
+-              folderId: album.folderId,
+-            },
+-            (fraction) => patch(item.key, { progress: fraction }),
+-          );
+-
+-          patch(item.key, { state: "pronto", progress: 1, finalSize: prepared.blob.size });
+-        } catch (caught) {
+-          patch(item.key, {
+-            state: "erro",
+-            error: caught instanceof Error ? caught.message : "Falha no envio.",
+-          });
++        await uploadToDrive(
++          prepared.blob,
++          { name: prepared.name, mimeType: prepared.mimeType, folderId },
++          (fraction) => patch(key, { progress: fraction }),
++        );
++
++        // O .HEIC original vai para `_originais`, fora da galeria.
++        if (prepared.preserveOriginal) {
++          const original = prepared.preserveOriginal;
++          try {
++            const originalsId = await ensureOriginalsFolder(folderId);
++            await uploadToDrive(
++              original,
++              {
++                name: original.name,
++                mimeType: original.type || primaryMimeFor(original.name),
++                folderId: originalsId,
++              },
++              () => {},
++            );
++          } catch (caught) {
++            // A foto visível já subiu: guardar o original é um extra, não pode
++            // transformar um envio bem-sucedido em erro.
++            console.warn("[upload] não foi possível guardar o original", original.name, caught);
++          }
+         }
++
++        patch(key, { state: "concluido", progress: 1, finalSize: prepared.blob.size });
++        return true;
++      } catch (caught) {
++        patch(key, {
++          state: "erro",
++          progress: 0,
++          error: caught instanceof Error ? caught.message : "Falha no envio.",
++        });
++        return false;
+       }
+-    };
++    },
++    [ensureOriginalsFolder, keepOriginals, optimize, patch],
++  );
++
++  /** Roda um conjunto de itens com paralelismo controlado. */
++  const runKeys = useCallback(
++    async (keys: string[]) => {
++      if (!album || keys.length === 0 || running) return;
++
++      setRunning(true);
++      setError(null);
++      setNotice(null);
++
++      const folderId = album.folderId;
++      let cursor = 0;
++      // Contagem local: `queueRef` pode estar um render atrás quando o loop
++      // termina, e a mensagem final precisa do número certo.
++      let sent = 0;
++      let failed = 0;
++
++      const worker = async () => {
++        while (cursor < keys.length) {
++          const key = keys[cursor++];
++          const ok = await processItem(key, folderId);
++          if (ok) sent += 1;
++          else failed += 1;
++        }
++      };
++
++      try {
++        await Promise.all(Array.from({ length: CONCURRENCY }, worker));
++
++        // Publica na hora, sem esperar o cache de 10 minutos vencer.
++        await fetch("/api/admin/revalidate", { method: "POST" }).catch(() => null);
++        await Promise.all([loadAlbums(), loadFiles(folderId), loadStatus()]);
+ 
+-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
++        setNotice(
++          failed > 0
++            ? `${sent} arquivo(s) enviado(s). ${failed} não foi(ram) enviado(s) — use “Tentar novamente”.`
++            : `${sent} arquivo${sent === 1 ? "" : "s"} enviado${sent === 1 ? "" : "s"} com sucesso.`,
++        );
++      } finally {
++        setRunning(false);
++      }
++    },
++    [album, loadAlbums, loadFiles, loadStatus, processItem, running],
++  );
++
++  const sendAll = () =>
++    runKeys(
++      queueRef.current
++        .filter((item) => item.state === "aguardando" || item.state === "erro")
++        .map((item) => item.key),
++    );
++
++  const retryFailed = () =>
++    runKeys(queueRef.current.filter((item) => item.state === "erro").map((item) => item.key));
+ 
+-    // Publica na hora, sem esperar o cache de 10 minutos vencer.
+-    await fetch("/api/admin/revalidate", { method: "POST" }).catch(() => null);
+-    await Promise.all([loadAlbums(), loadPhotos(album.folderId), loadStatus()]);
+-    setNotice("Envio concluído. As fotos já estão no site.");
++  const retryOne = (key: string) => runKeys([key]);
++
++  const removeItem = (key: string) => {
++    const item = queueRef.current.find((entry) => entry.key === key);
++    if (item) dropThumbnail(item);
++    setQueue((current) => current.filter((entry) => entry.key !== key));
++  };
++
++  const clearDone = () => {
++    for (const item of queueRef.current) {
++      if (item.state === "concluido") dropThumbnail(item);
++    }
++    setQueue((current) => current.filter((item) => item.state !== "concluido"));
+   };
+ 
+-  const removePhoto = async (photo: AdminPhoto) => {
+-    if (!window.confirm(`Remover “${photo.name}” do site?\n\nA foto vai para a lixeira do Google Drive e pode ser restaurada por lá.`)) {
++  const removeFile = async (file: AdminFile) => {
++    if (
++      !window.confirm(
++        `Remover “${file.name}” do site?\n\nO arquivo vai para a lixeira do Google Drive e pode ser restaurado por lá.`,
++      )
++    ) {
+       return;
+     }
+-    setBusy(photo.id);
++    setBusy(file.id);
+     try {
+-      const response = await fetch(`/api/admin/photos?id=${photo.id}`, { method: "DELETE" });
++      const response = await fetch(`/api/admin/photos?id=${file.id}`, { method: "DELETE" });
+       if (!response.ok) throw new Error((await response.json()).error);
+-      setPhotos((current) => current.filter((item) => item.id !== photo.id));
++      setFiles((current) => current.filter((item) => item.id !== file.id));
+       await fetch("/api/admin/revalidate", { method: "POST" }).catch(() => null);
+     } catch (caught) {
+       setError(caught instanceof Error ? caught.message : "Falha ao remover.");
+@@ -470,47 +740,83 @@ export default function AdminPanel() {
+ 
+           {/* ------------------------------------------------------------ envio */}
+           <section className={`${card} flex flex-col gap-5`}>
+-            <div className="flex flex-wrap items-center justify-between gap-3">
++            <div className="flex flex-wrap items-center justify-between gap-4">
+               <h2 className="m-0 text-lg font-bold text-white">
+-                Enviar fotos{album ? ` para ${album.name}` : ""}
++                Enviar arquivos{album ? ` para ${album.name}` : ""}
+               </h2>
+-              <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-muted">
+-                <input
+-                  type="checkbox"
+-                  checked={optimize}
+-                  onChange={(event) => setOptimize(event.target.checked)}
+-                  className="h-4 w-4 accent-[#d4af37]"
+-                />
+-                Otimizar para a web (recomendado)
+-              </label>
++              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
++                <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-muted">
++                  <input
++                    type="checkbox"
++                    checked={optimize}
++                    onChange={(event) => setOptimize(event.target.checked)}
++                    className="h-4 w-4 accent-[#d4af37]"
++                  />
++                  Otimizar para a web
++                </label>
++                <label
++                  className="flex cursor-pointer items-center gap-2.5 text-[13px] text-muted"
++                  title="O .HEIC original vai para a subpasta _originais do álbum. Ocupa cota extra no Drive."
++                >
++                  <input
++                    type="checkbox"
++                    checked={keepOriginals}
++                    onChange={(event) => setKeepOriginals(event.target.checked)}
++                    className="h-4 w-4 accent-[#d4af37]"
++                  />
++                  Guardar HEIC original
++                </label>
++              </div>
+             </div>
+ 
++            {/* ------------------------------------------------ arraste e solte */}
+             <div
+-              onDragOver={(event) => {
++              onDragEnter={(event) => {
+                 event.preventDefault();
++                dragDepth.current += 1;
+                 setDragging(true);
+               }}
+-              onDragLeave={() => setDragging(false)}
++              onDragOver={(event) => {
++                event.preventDefault();
++                if (!dragging) setDragging(true);
++              }}
++              onDragLeave={(event) => {
++                event.preventDefault();
++                dragDepth.current = Math.max(0, dragDepth.current - 1);
++                if (dragDepth.current === 0) setDragging(false);
++              }}
+               onDrop={(event) => {
+                 event.preventDefault();
++                dragDepth.current = 0;
+                 setDragging(false);
+                 addFiles(event.dataTransfer.files);
+               }}
+-              className={`flex flex-col items-center gap-4 rounded-xl border-2 border-dashed px-6 py-12 text-center transition-colors duration-300 ${
+-                dragging ? "border-gold bg-gold/10" : "border-gold/25 bg-ink/40"
++              className={`relative flex flex-col items-center gap-3 rounded-xl border-2 border-dashed px-6 py-12 text-center transition-all duration-300 ${
++                dragging
++                  ? "scale-[1.01] border-gold bg-gold/10 shadow-[0_0_60px_-20px_rgba(212,175,55,0.6)]"
++                  : "border-gold/25 bg-ink/40"
+               }`}
+             >
+-              <CloudUpload size={30} strokeWidth={1.3} className="text-gold" />
+-              <p className="m-0 text-sm text-muted">
+-                Arraste as fotos aqui — ou selecione do computador.
++              <CloudUpload
++                size={32}
++                strokeWidth={1.2}
++                className={`text-gold transition-transform duration-300 ${
++                  dragging ? "-translate-y-1 scale-110" : ""
++                }`}
++              />
++              <p className="m-0 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.2em] text-white">
++                ARRASTE SEUS ARQUIVOS AQUI
+               </p>
++              <p className="m-0 text-[13px] text-muted">ou clique para selecionar</p>
++
+               <input
+                 ref={inputRef}
+                 type="file"
+-                accept="image/*"
++                accept={ACCEPT_ATTRIBUTE}
+                 multiple
+                 onChange={(event) => {
+                   if (event.target.files) addFiles(event.target.files);
++                  // Zera para permitir escolher o mesmo arquivo de novo.
+                   event.target.value = "";
+                 }}
+                 className="hidden"
+@@ -519,10 +825,19 @@ export default function AdminPanel() {
+                 type="button"
+                 onClick={() => inputRef.current?.click()}
+                 disabled={!album}
+-                className={`${chip} border-gold/40 text-gold hover:border-gold disabled:cursor-not-allowed disabled:opacity-40`}
++                className={`${chip} mt-1 border-gold/40 text-gold hover:border-gold disabled:cursor-not-allowed disabled:opacity-40`}
+               >
+-                ESCOLHER ARQUIVOS
++                {queue.length > 0 ? "ADICIONAR MAIS ARQUIVOS" : "ESCOLHER ARQUIVOS"}
+               </button>
++
++              <p className="m-0 font-[family-name:var(--font-mono)] text-[9px] tracking-[0.16em] text-[#5b678a]">
++                FOTOS · VÍDEOS · DOCUMENTOS
++              </p>
++              <p className="m-0 max-w-[420px] text-[11px] leading-relaxed text-[#5b678a]">
++                JPG · PNG · WEBP · HEIC · HEIF · MP4 · MOV · WEBM · PDF · DOC · DOCX · XLS ·
++                XLSX · PPT · PPTX
++              </p>
++
+               {!album && (
+                 <span className="text-[12px] text-[#ffb4b4]">
+                   Crie ou selecione um álbum antes de enviar.
+@@ -530,97 +845,172 @@ export default function AdminPanel() {
+               )}
+             </div>
+ 
++            {/* ------------------------------------------------------- a fila */}
+             {queue.length > 0 && (
+-              <div className="flex flex-col gap-3">
+-                <div className="flex flex-wrap items-center justify-between gap-3">
+-                  <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.16em] text-muted">
+-                    {queue.filter((item) => item.state === "pronto").length}/{queue.length}{" "}
+-                    ENVIADAS
+-                  </span>
+-                  <div className="flex flex-wrap gap-2.5">
+-                    <button
+-                      type="button"
+-                      onClick={() =>
+-                        setQueue((current) =>
+-                          current.filter((item) => item.state !== "pronto"),
+-                        )
+-                      }
+-                      disabled={uploading}
+-                      className={`${chip} border-gold/20 text-muted hover:border-gold/60 hover:text-white disabled:opacity-40`}
+-                    >
+-                      LIMPAR CONCLUÍDAS
+-                    </button>
+-                    <button
+-                      type="button"
+-                      onClick={sendAll}
+-                      disabled={!album || uploading}
+-                      className={`${chip} border-gold bg-gradient-to-b from-gold-bright to-gold font-bold text-ink disabled:cursor-not-allowed disabled:opacity-40`}
+-                    >
+-                      {uploading ? (
+-                        <Loader2 size={14} className="animate-spin" />
+-                      ) : (
+-                        <CloudUpload size={14} strokeWidth={2} />
++              <div className="flex flex-col gap-4">
++                {/* progresso geral */}
++                <div className="flex flex-col gap-2">
++                  <div className="flex flex-wrap items-center justify-between gap-3">
++                    <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.16em] text-muted">
++                      {totals.done} / {totals.total} ARQUIVOS
++                      {totals.failed > 0 && (
++                        <span className="ml-2 text-[#ffb4b4]">· {totals.failed} COM ERRO</span>
++                      )}
++                    </span>
++
++                    <div className="flex flex-wrap gap-2.5">
++                      {totals.failed > 0 && !running && (
++                        <button
++                          type="button"
++                          onClick={retryFailed}
++                          className={`${chip} border-[#ff9d9d]/40 text-[#ffb4b4] hover:border-[#ff9d9d]`}
++                        >
++                          <RotateCcw size={13} strokeWidth={1.8} /> TENTAR NOVAMENTE
++                        </button>
+                       )}
+-                      {uploading ? "ENVIANDO…" : "ENVIAR TUDO"}
+-                    </button>
++                      <button
++                        type="button"
++                        onClick={clearDone}
++                        disabled={running || totals.done === 0}
++                        className={`${chip} border-gold/20 text-muted hover:border-gold/60 hover:text-white disabled:opacity-40`}
++                      >
++                        LIMPAR CONCLUÍDAS
++                      </button>
++                      <button
++                        type="button"
++                        onClick={sendAll}
++                        disabled={!album || running || totals.pending === 0}
++                        className={`${chip} border-gold bg-gradient-to-b from-gold-bright to-gold font-bold text-ink disabled:cursor-not-allowed disabled:opacity-40`}
++                      >
++                        {running ? (
++                          <Loader2 size={14} className="animate-spin" />
++                        ) : (
++                          <CloudUpload size={14} strokeWidth={2} />
++                        )}
++                        {running ? "ENVIANDO…" : `ENVIAR ${totals.pending}`}
++                      </button>
++                    </div>
++                  </div>
++
++                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#101a33]">
++                    <div
++                      className="h-full rounded-full bg-gradient-to-r from-gold-deep via-gold to-gold-bright transition-[width] duration-300"
++                      style={{ width: `${Math.round(totals.fraction * 100)}%` }}
++                    />
+                   </div>
+                 </div>
+ 
+-                <ul className="m-0 flex list-none flex-col gap-2 p-0">
++                {/* itens */}
++                <ul className="m-0 flex max-h-[420px] list-none flex-col gap-2 overflow-y-auto p-0 pr-1">
+                   {queue.map((item) => (
+                     <li
+                       key={item.key}
+-                      className="flex items-center gap-3 rounded-lg border border-gold/12 bg-ink/50 px-4 py-3"
++                      className={`flex items-center gap-3 rounded-lg border bg-ink/50 px-3 py-3 transition-colors duration-300 ${
++                        item.state === "erro"
++                          ? "border-[#ff9d9d]/35"
++                          : item.state === "concluido"
++                            ? "border-gold/25"
++                            : "border-gold/12"
++                      }`}
+                     >
++                      {/* miniatura ou bloco com a extensão */}
++                      <span className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gold/15 bg-navy">
++                        {item.thumbUrl ? (
++                          // eslint-disable-next-line @next/next/no-img-element
++                          <img
++                            src={item.thumbUrl}
++                            alt=""
++                            aria-hidden="true"
++                            className="h-full w-full object-cover"
++                          />
++                        ) : item.kind === "video" ? (
++                          <Film size={16} strokeWidth={1.6} className="text-gold/70" />
++                        ) : item.kind === "documento" ? (
++                          <FileText size={16} strokeWidth={1.6} className="text-gold/70" />
++                        ) : (
++                          <span className="font-[family-name:var(--font-mono)] text-[8px] tracking-[0.08em] text-gold/70">
++                            {item.label}
++                          </span>
++                        )}
++                      </span>
++
+                       <div className="min-w-0 flex-1">
+                         <div className="flex items-center justify-between gap-3">
+-                          <span className="truncate text-[13px] text-white">
+-                            {item.file.name}
+-                          </span>
++                          <span className="truncate text-[13px] text-white">{item.file.name}</span>
+                           <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.1em] text-muted">
+-                            {item.state === "pronto" && item.finalSize
++                            {item.state === "concluido" && item.finalSize
+                               ? `${formatBytes(item.file.size)} → ${formatBytes(item.finalSize)}`
+                               : formatBytes(item.file.size)}
+                           </span>
+                         </div>
++
++                        <div className="mt-1 flex items-center gap-2 font-[family-name:var(--font-mono)] text-[9px] tracking-[0.14em] text-[#5b678a]">
++                          <span className="text-gold/70">{item.label}</span>
++                          <span aria-hidden="true">•</span>
++                          <span
++                            className={
++                              item.state === "erro"
++                                ? "text-[#ffb4b4]"
++                                : item.state === "concluido"
++                                  ? "text-gold"
++                                  : ""
++                            }
++                          >
++                            {STATE_LABEL[item.state]}
++                          </span>
++                          {item.convertedFromHeic && item.state === "concluido" && (
++                            <>
++                              <span aria-hidden="true">•</span>
++                              <span className="text-gold/60">HEIC → JPG</span>
++                            </>
++                          )}
++                        </div>
++
+                         <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[#101a33]">
+                           <div
+                             className={`h-full rounded-full transition-[width] duration-300 ${
+                               item.state === "erro"
+                                 ? "bg-[#ff9d9d]"
+-                                : "bg-gradient-to-r from-gold-deep via-gold to-gold-bright"
++                                : item.state === "convertendo"
++                                  ? "animate-shimmer bg-gradient-to-r from-gold-deep via-gold-bright to-gold-deep"
++                                  : "bg-gradient-to-r from-gold-deep via-gold to-gold-bright"
+                             }`}
+                             style={{
+                               width:
+-                                item.state === "pronto"
++                                item.state === "concluido" || item.state === "erro"
+                                   ? "100%"
+-                                  : item.state === "erro"
++                                  : item.state === "convertendo"
+                                     ? "100%"
+                                     : `${Math.round(item.progress * 100)}%`,
+                             }}
+                           />
+                         </div>
++
+                         {item.error && (
+-                          <span className="mt-1.5 block text-[11px] text-[#ffb4b4]">
++                          <span className="mt-1.5 block text-[11px] leading-relaxed text-[#ffb4b4]">
+                             {item.error}
+                           </span>
+                         )}
+                       </div>
+ 
+-                      <span className="shrink-0">
+-                        {item.state === "pronto" ? (
++                      <span className="flex shrink-0 items-center gap-1.5">
++                        {item.state === "concluido" ? (
+                           <Check size={16} className="text-gold" />
+                         ) : item.state === "erro" ? (
+-                          <AlertTriangle size={16} className="text-[#ff9d9d]" />
++                          <button
++                            type="button"
++                            onClick={() => retryOne(item.key)}
++                            disabled={running}
++                            aria-label={`Tentar enviar ${item.file.name} novamente`}
++                            className="flex h-8 w-8 items-center justify-center rounded-full border border-[#ff9d9d]/40 text-[#ffb4b4] transition-colors hover:border-[#ff9d9d] hover:bg-[#ff9d9d]/10 disabled:opacity-40"
++                          >
++                            <RotateCcw size={13} strokeWidth={1.8} />
++                          </button>
+                         ) : item.state === "aguardando" ? (
+                           <button
+                             type="button"
+                             aria-label={`Tirar ${item.file.name} da fila`}
+-                            onClick={() =>
+-                              setQueue((current) =>
+-                                current.filter((entry) => entry.key !== item.key),
+-                              )
+-                            }
++                            onClick={() => removeItem(item.key)}
+                             className="text-muted transition-colors hover:text-white"
+                           >
+                             <X size={15} />
+@@ -636,41 +1026,55 @@ export default function AdminPanel() {
+             )}
+           </section>
+ 
+-          {/* ------------------------------------------------ fotos já publicadas */}
++          {/* ------------------------------------------------ já publicado */}
+           {album && (
+             <section className={`${card} flex flex-col gap-4`}>
+               <h2 className="m-0 text-lg font-bold text-white">
+                 No ar em {album.name}{" "}
+                 <span className="font-[family-name:var(--font-mono)] text-[11px] font-normal tracking-[0.14em] text-muted">
+-                  {photos.length} FOTOS
++                  {files.length} ARQUIVO{files.length === 1 ? "" : "S"}
+                 </span>
+               </h2>
+ 
+-              {photos.length === 0 ? (
++              {files.length === 0 ? (
+                 <p className="m-0 text-sm text-muted">Este álbum ainda está vazio.</p>
+               ) : (
+                 <div className="grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2">
+-                  {photos.map((photo) => (
++                  {files.map((file) => (
+                     <div
+-                      key={photo.id}
++                      key={file.id}
+                       className="group relative aspect-square overflow-hidden rounded-md border border-gold/12 bg-ink"
+                     >
+-                      {/* eslint-disable-next-line @next/next/no-img-element */}
+-                      <img
+-                        src={photo.thumbnailUrl}
+-                        alt={photo.name}
+-                        loading="lazy"
+-                        decoding="async"
+-                        className="h-full w-full object-cover"
+-                      />
++                      {file.thumbnailUrl ? (
++                        // eslint-disable-next-line @next/next/no-img-element
++                        <img
++                          src={file.thumbnailUrl}
++                          alt={file.name}
++                          loading="lazy"
++                          decoding="async"
++                          className="h-full w-full object-cover"
++                        />
++                      ) : (
++                        <span className="flex h-full w-full flex-col items-center justify-center gap-2 px-2 text-center">
++                          {file.kind === "video" ? (
++                            <Film size={20} strokeWidth={1.4} className="text-gold/70" />
++                          ) : (
++                            <FileText size={20} strokeWidth={1.4} className="text-gold/70" />
++                          )}
++                          <span className="w-full truncate font-[family-name:var(--font-mono)] text-[8px] tracking-[0.1em] text-muted">
++                            {labelOf(file.name)}
++                          </span>
++                        </span>
++                      )}
++
+                       <button
+                         type="button"
+-                        onClick={() => removePhoto(photo)}
+-                        disabled={busy === photo.id}
+-                        aria-label={`Remover ${photo.name}`}
++                        onClick={() => removeFile(file)}
++                        disabled={busy === file.id}
++                        aria-label={`Remover ${file.name}`}
+                         className="absolute right-1.5 top-1.5 flex h-8 w-8 items-center justify-center rounded-full border border-[#ff9d9d]/50 bg-ink/80 text-[#ffb4b4] backdrop-blur-sm transition-all duration-300 hover:bg-[#ff9d9d] hover:text-ink md:opacity-0 md:group-hover:opacity-100"
+                       >
+-                        {busy === photo.id ? (
++                        {busy === file.id ? (
+                           <Loader2 size={13} className="animate-spin" />
+                         ) : (
+                           <Trash2 size={13} strokeWidth={1.8} />
+diff --git a/src/app/api/admin/originals-folder/route.ts b/src/app/api/admin/originals-folder/route.ts
+new file mode 100644
+index 0000000..5bdc3f6
+--- /dev/null
++++ b/src/app/api/admin/originals-folder/route.ts
+@@ -0,0 +1,53 @@
++import { guardAdmin } from "@/lib/admin-auth";
++import { ORIGINALS_FOLDER } from "@/config/uploads";
++import { findOrCreateFolder } from "@/lib/drive";
++import { isDriveConfigured } from "@/lib/google-auth";
++
++export const runtime = "nodejs";
++
++/**
++ * Devolve (criando na primeira vez) a subpasta `_originais` de um álbum.
++ *
++ * Serve ao requisito do briefing de preservar o .HEIC original no Drive e usar
++ * o JPEG apenas como versão visualizável. Guardar o original DENTRO da pasta do
++ * álbum, numa subpasta, é o que mantém tudo invisível para o site:
++ *
++ *  - `listAlbums` só enxerga subpastas da pasta RAIZ, então `_originais` nunca
++ *    vira um álbum;
++ *  - `listFolderImages` filtra por `mimeType contains 'image/'`, e uma pasta
++ *    não tem MIME de imagem — logo o conteúdo dela não entra na galeria.
++ *
++ * Nenhuma rota, variável de ambiente ou estrutura existente foi alterada para
++ * isso: é só uma pasta a mais dentro do Drive que já está configurado.
++ */
++export async function POST(request: Request) {
++  const denied = await guardAdmin();
++  if (denied) return denied;
++
++  if (!isDriveConfigured()) {
++    return Response.json({ error: "Google Drive não configurado." }, { status: 503 });
++  }
++
++  let albumFolderId = "";
++  try {
++    const body = (await request.json()) as { albumFolderId?: string };
++    albumFolderId = (body.albumFolderId ?? "").trim();
++  } catch {
++    return Response.json({ error: "Requisição inválida." }, { status: 400 });
++  }
++
++  if (!/^[A-Za-z0-9_-]{10,}$/.test(albumFolderId)) {
++    return Response.json({ error: "Álbum inválido." }, { status: 400 });
++  }
++
++  try {
++    const folder = await findOrCreateFolder(ORIGINALS_FOLDER, albumFolderId);
++    return Response.json({ ok: true, folderId: folder.id });
++  } catch (error) {
++    console.error("[admin/originals-folder]", error);
++    return Response.json(
++      { error: error instanceof Error ? error.message : "Falha ao preparar a pasta." },
++      { status: 502 },
++    );
++  }
++}
+diff --git a/src/app/api/admin/photos/route.ts b/src/app/api/admin/photos/route.ts
+index e06c312..eb0644b 100644
+--- a/src/app/api/admin/photos/route.ts
++++ b/src/app/api/admin/photos/route.ts
+@@ -1,11 +1,20 @@
+ import { guardAdmin } from "@/lib/admin-auth";
+-import { listFolderImages, trashFile } from "@/lib/drive";
++import { kindOf } from "@/config/uploads";
++import { listFolderFiles, trashFile } from "@/lib/drive";
+ import { isDriveConfigured } from "@/lib/google-auth";
+ 
+ export const runtime = "nodejs";
+ export const maxDuration = 60;
+ 
+-/** Fotos de uma pasta, sem cache — o painel precisa do estado real agora. */
++/**
++ * Arquivos de uma pasta, sem cache — o painel precisa do estado real agora.
++ *
++ * Passou a usar `listFolderFiles` (tudo, menos subpastas) no lugar de
++ * `listFolderImages`. Motivo: agora que vídeo e documento podem ser enviados,
++ * eles precisam aparecer no painel para poderem ser conferidos e removidos.
++ * A galeria pública NÃO mudou — ela continua em `listFolderImages` e segue
++ * mostrando só fotos.
++ */
+ export async function GET(request: Request) {
+   const denied = await guardAdmin();
+   if (denied) return denied;
+@@ -20,14 +29,21 @@ export async function GET(request: Request) {
+   }
+ 
+   try {
+-    const files = await listFolderImages(folderId, 0);
++    const files = await listFolderFiles(folderId, 0);
+     return Response.json({
+-      photos: files.map((file) => ({
+-        id: file.id,
+-        name: file.name,
+-        size: file.size ? Number(file.size) : 0,
+-        thumbnailUrl: `/api/photo/${file.id}?w=400`,
+-      })),
++      photos: files.map((file) => {
++        const isImage = (file.mimeType ?? "").startsWith("image/");
++        return {
++          id: file.id,
++          name: file.name,
++          size: file.size ? Number(file.size) : 0,
++          kind: kindOf(file.name) ?? (isImage ? "imagem" : "documento"),
++          // Só imagem tem miniatura: /api/photo usa o sharp, que não abre
++          // vídeo nem PDF. Para os outros o painel desenha um bloco com a
++          // extensão em vez de pedir uma imagem que voltaria com erro.
++          thumbnailUrl: isImage ? `/api/photo/${file.id}?w=400` : null,
++        };
++      }),
+     });
+   } catch (error) {
+     console.error("[admin/photos] GET", error);
+diff --git a/src/app/api/admin/upload-session/route.ts b/src/app/api/admin/upload-session/route.ts
+index b44ece3..b4e2592 100644
+--- a/src/app/api/admin/upload-session/route.ts
++++ b/src/app/api/admin/upload-session/route.ts
+@@ -1,4 +1,5 @@
+ import { guardAdmin } from "@/lib/admin-auth";
++import { MAX_UPLOAD_BYTES, validateUpload } from "@/config/uploads";
+ import { createResumableSession } from "@/lib/drive";
+ import { isDriveConfigured } from "@/lib/google-auth";
+ 
+@@ -8,6 +9,13 @@ export const runtime = "nodejs";
+  * Abre a sessão de upload no Google e devolve só a URL dela.
+  * O navegador manda os bytes direto para o Google: nenhum arquivo passa por
+  * aqui (sem o limite de 4,5 MB da Vercel) e o token continua no servidor.
++ *
++ * A validação deixou de ser `mimeType.startsWith("image/")` e passou a usar a
++ * allowlist de `src/config/uploads.ts` — a mesma do painel. Foi a mudança
++ * mínima necessária para aceitar vídeo e documento sem afrouxar a segurança:
++ * a extensão precisa estar na lista E o MIME informado precisa bater com ela.
++ * O teto de 200 MB é exatamente o que já existia aqui, só que agora vem da
++ * constante compartilhada.
+  */
+ export async function POST(request: Request) {
+   const denied = await guardAdmin();
+@@ -28,11 +36,12 @@ export async function POST(request: Request) {
+   if (!name || !mimeType || !folderId || !size) {
+     return Response.json({ error: "Dados do arquivo incompletos." }, { status: 400 });
+   }
+-  if (!mimeType.startsWith("image/")) {
+-    return Response.json({ error: "Só é possível enviar imagens." }, { status: 415 });
+-  }
+-  if (size > 200 * 1024 * 1024) {
+-    return Response.json({ error: "Arquivo acima de 200 MB." }, { status: 413 });
++
++  const check = validateUpload(name, mimeType, size, MAX_UPLOAD_BYTES);
++  if (!check.ok) {
++    // 413 para tamanho, 415 para formato — o painel usa isso na mensagem.
++    const tooLarge = size > MAX_UPLOAD_BYTES;
++    return Response.json({ error: check.reason }, { status: tooLarge ? 413 : 415 });
+   }
+ 
+   try {
+diff --git a/src/app/api/admin/upload/route.ts b/src/app/api/admin/upload/route.ts
+index 60ddfae..325b581 100644
+--- a/src/app/api/admin/upload/route.ts
++++ b/src/app/api/admin/upload/route.ts
+@@ -1,16 +1,19 @@
+ import { guardAdmin } from "@/lib/admin-auth";
++import { MAX_FALLBACK_BYTES, validateUpload } from "@/config/uploads";
+ import { uploadMultipart } from "@/lib/drive";
+ import { isDriveConfigured } from "@/lib/google-auth";
+ 
+ export const runtime = "nodejs";
+ export const maxDuration = 60;
+ 
+-/** Limite prático das functions da Vercel (4,5 MB) com folga. */
+-const MAX_BYTES = 4 * 1024 * 1024;
+-
+ /**
+  * Caminho reserva: usado só se o envio direto para o Google falhar
+  * (rede corporativa que bloqueia googleapis.com, por exemplo).
++ *
++ * O teto continua sendo o limite prático das functions da Vercel (4,5 MB) com
++ * folga — mesmo valor de antes, agora vindo de MAX_FALLBACK_BYTES. A checagem
++ * `file.type.startsWith("image/")` virou a allowlist compartilhada para que
++ * vídeo e documento também tenham caminho reserva.
+  */
+ export async function POST(request: Request) {
+   const denied = await guardAdmin();
+@@ -34,20 +37,23 @@ export async function POST(request: Request) {
+   if (!(file instanceof File) || !folderId || !name) {
+     return Response.json({ error: "Dados do arquivo incompletos." }, { status: 400 });
+   }
+-  if (!file.type.startsWith("image/")) {
+-    return Response.json({ error: "Só é possível enviar imagens." }, { status: 415 });
+-  }
+-  if (file.size > MAX_BYTES) {
++
++  if (file.size > MAX_FALLBACK_BYTES) {
+     return Response.json(
+       { error: "Arquivo grande demais para o caminho reserva. Ative a otimização no envio." },
+       { status: 413 },
+     );
+   }
+ 
++  const check = validateUpload(name, file.type, file.size, MAX_FALLBACK_BYTES);
++  if (!check.ok) {
++    return Response.json({ error: check.reason }, { status: 415 });
++  }
++
+   try {
+     const created = await uploadMultipart({
+       name,
+-      mimeType: file.type,
++      mimeType: file.type || "application/octet-stream",
+       folderId,
+       body: await file.arrayBuffer(),
+     });
+diff --git a/src/app/globals.css b/src/app/globals.css
+index 859aed4..6444af6 100644
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -102,6 +102,18 @@ body {
+   transform: translateX(120%);
+ }
+ 
++/* Vinheta: escurece as bordas e empurra o olho para o centro. É o que separa
++   "foto com um gradiente por cima" de "quadro de cinema". */
++.vignette {
++  pointer-events: none;
++  background: radial-gradient(
++    120% 90% at 50% 42%,
++    transparent 44%,
++    rgba(4, 6, 14, 0.5) 76%,
++    rgba(4, 6, 14, 0.88) 100%
++  );
++}
++
+ /* Grão: tira o aspecto "gradiente de CSS" do fundo escuro. */
+ .grain::before {
+   content: "";
+@@ -167,6 +179,21 @@ body {
+   animation: shimmer 2.4s linear infinite;
+ }
+ 
++/* No celular o orçamento de GPU é outro: os efeitos contínuos (brilho pulsante
++   e selo girando) saem, e o que fica são as transições pontuais de toque e o
++   reveal no scroll. A identidade continua a mesma; só não há animação rodando
++   o tempo todo atrás do conteúdo. */
++@media (max-width: 640px) {
++  .animate-glow {
++    animation: none;
++    opacity: 0.55;
++  }
++
++  .animate-spin-slow {
++    animation-duration: 90s;
++  }
++}
++
+ @media (prefers-reduced-motion: reduce) {
+   *,
+   *::before,
+diff --git a/src/components/AlbumCard.tsx b/src/components/AlbumCard.tsx
+index 5ab596e..b5a8db2 100644
+--- a/src/components/AlbumCard.tsx
++++ b/src/components/AlbumCard.tsx
+@@ -39,6 +39,12 @@ export default function AlbumCard({ album }: { album: AlbumWithPhotos }) {
+           className="absolute inset-0 bg-[radial-gradient(circle_at_50%_92%,rgba(212,175,55,0.32),transparent_62%)] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+         />
+ 
++        {/* Filete dourado que corre no topo do card ao passar o mouse. */}
++        <span
++          aria-hidden="true"
++          className="absolute inset-x-0 top-0 h-px origin-left scale-x-0 bg-gradient-to-r from-transparent via-gold-bright to-transparent transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-x-100"
++        />
++
+         <span className="absolute inset-x-[18px] bottom-[18px] flex flex-col gap-1.5 transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:-translate-y-1.5">
+           <span className="text-[19px] font-semibold tracking-[-0.01em] text-white">
+             {album.name}
+diff --git a/src/components/AlbumGrid.tsx b/src/components/AlbumGrid.tsx
+index 6746741..ec8d132 100644
+--- a/src/components/AlbumGrid.tsx
++++ b/src/components/AlbumGrid.tsx
+@@ -21,7 +21,7 @@ export default function AlbumGrid({ albums }: { albums: AlbumWithPhotos[] }) {
+             fizer o envio.
+           </p>
+         ) : (
+-          <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3.5">
++          <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5 sm:gap-4">
+             {albums.map((album) => (
+               <AlbumCard key={album.id} album={album} />
+             ))}
+diff --git a/src/components/CTASection.tsx b/src/components/CTASection.tsx
+index 74f2dcc..7c8c0c3 100644
+--- a/src/components/CTASection.tsx
++++ b/src/components/CTASection.tsx
+@@ -1,8 +1,13 @@
+ import Link from "next/link";
++import { eventConfig } from "@/config/event";
+ import ParallaxImage from "./ParallaxImage";
+ import Reveal from "./Reveal";
+ import type { AlbumWithPhotos, Photo } from "@/types";
+ 
++/**
++ * Fechamento da home. O link continua indo para o primeiro álbum publicado —
++ * mesma lógica de antes; só o texto e o desenho mudaram.
++ */
+ export default function CTASection({
+   photo,
+   albums,
+@@ -13,32 +18,47 @@ export default function CTASection({
+   const first = albums[0];
+ 
+   return (
+-    <section className="relative flex min-h-[78svh] items-center overflow-hidden px-[22px]">
++    <section className="relative flex min-h-[82svh] items-center overflow-hidden px-[22px]">
+       <ParallaxImage photo={photo} alt="" depth={0.14} className="absolute inset-0" />
+       <span
+         aria-hidden="true"
+-        className="absolute inset-0 bg-[linear-gradient(180deg,#04060e,rgba(8,18,39,0.6)_45%,#04060e)]"
++        className="absolute inset-0 bg-[linear-gradient(180deg,#04060e,rgba(8,18,39,0.55)_45%,#04060e)]"
+       />
++      <span aria-hidden="true" className="vignette absolute inset-0" />
+       <span
+         aria-hidden="true"
+-        className="animate-glow absolute bottom-[-20%] left-1/2 -ml-[420px] h-[min(120vw,840px)] w-[min(120vw,840px)] rounded-full bg-[radial-gradient(circle,rgba(212,175,55,0.24),transparent_65%)] blur-[40px]"
++        className="animate-glow absolute bottom-[-20%] left-1/2 -ml-[420px] h-[min(120vw,840px)] w-[min(120vw,840px)] rounded-full bg-[radial-gradient(circle,rgba(212,175,55,0.22),transparent_65%)] blur-[40px]"
+       />
+ 
+-      <Reveal className="relative mx-auto flex w-full max-w-[1180px] flex-col gap-5">
+-        <h2 className="m-0 max-w-[900px] text-[clamp(34px,10vw,100px)] font-extrabold leading-[0.9] tracking-[-0.04em] text-white">
+-          ENCONTRE A SUA <span className="text-gold-gradient">FOTO</span>.
++      <Reveal className="relative mx-auto flex w-full max-w-[1180px] flex-col items-start gap-7">
++        <h2 className="m-0 max-w-[980px] text-[clamp(32px,9vw,96px)] font-extrabold leading-[0.94] tracking-[-0.04em] text-white">
++          <span className="block">{eventConfig.finalCta.lineOne}</span>
++          <span className="text-gold-gradient block pb-[0.06em]">
++            {eventConfig.finalCta.lineTwo}
++          </span>
+         </h2>
+-        <p className="m-0 max-w-[430px] text-[15px] leading-relaxed text-muted">
++
++        <div className="flex items-center gap-4">
++          <span aria-hidden="true" className="h-px w-10 bg-gold/50" />
++          <span className="text-[11px] font-bold tracking-[0.34em] text-white/90 sm:text-[13px]">
++            {eventConfig.brand.toUpperCase()}
++          </span>
++        </div>
++
++        {/* Frase preservada da versão anterior: continua sendo a informação
++            mais útil desta seção para quem chega procurando a própria foto. */}
++        <p className="m-0 max-w-[430px] text-[15px] leading-[1.7] text-muted text-pretty">
+           Baixe em alta resolução, uma por uma ou várias de uma vez. Sem cadastro,
+           sem marca d&apos;água.
+         </p>
++
+         {first && (
+           <Link
+             href={`/album/${first.id}`}
+             data-cursor="→"
+             className="gold-sheen flex min-h-[54px] w-fit items-center rounded-full bg-gradient-to-b from-gold-bright to-gold px-9 text-[11px] font-bold tracking-[0.2em] text-ink transition-all duration-300 hover:-translate-y-0.5 hover:from-white hover:to-gold-bright"
+           >
+-            ABRIR A GALERIA
++            {eventConfig.finalCta.button}
+           </Link>
+         )}
+       </Reveal>
+diff --git a/src/components/EventSeal.tsx b/src/components/EventSeal.tsx
+index d32effb..9b88242 100644
+--- a/src/components/EventSeal.tsx
++++ b/src/components/EventSeal.tsx
+@@ -58,16 +58,18 @@ export default function EventSeal({ className = "" }: { className?: string }) {
+         opacity="0.6"
+       />
+ 
+-      {/* Faixa de texto circular, girando devagar */}
++      {/* Faixa de texto circular, girando devagar.
++          `textLength` + `lengthAdjust="spacing"` obrigam o texto a ocupar
++          exatamente a circunferência (2·π·122 ≈ 766). Sem isso o espaçamento
++          fixo somava mais de 1000px e as duas voltas se sobrepunham. */}
+       <g className="animate-spin-slow" style={{ transformOrigin: "160px 160px" }}>
+         <text
+           fill="#d4af37"
+-          fontSize="11.5"
+-          letterSpacing="5.6"
++          fontSize="9.5"
+           fontFamily="var(--font-mono), monospace"
+-          opacity="0.85"
++          opacity="0.8"
+         >
+-          <textPath href="#seal-arc" startOffset="2%">
++          <textPath href="#seal-arc" startOffset="0%" textLength="758" lengthAdjust="spacing">
+             CONHECIMENTO · NETWORKING · ESTRATÉGIA · CONHECIMENTO · NETWORKING · ESTRATÉGIA ·
+           </textPath>
+         </text>
+@@ -90,9 +92,12 @@ export default function EventSeal({ className = "" }: { className?: string }) {
+         <rect x="180" y="152" width="9" height="60" rx="1.5" />
+       </g>
+ 
++      {/* dx compensa o espaçamento que o SVG adiciona DEPOIS da última letra:
++          sem isso o texto centralizado fica meio caractere à direita. */}
+       <text
+         x="160"
+         y="140"
++        dx="-3.5"
+         textAnchor="middle"
+         fill="#ffffff"
+         fontSize="15"
+@@ -128,18 +133,27 @@ export default function EventSeal({ className = "" }: { className?: string }) {
+         TRIBUTÁRIA
+       </text>
+ 
+-      <line x1="96" y1="276" x2="224" y2="276" stroke="url(#seal-gold)" strokeWidth="0.9" opacity="0.7" />
++      {/*
++        Aqui existia "PREPARE-SE PARA O NOVO CENÁRIO".
++        A frase tem 30 caracteres: no tamanho usado ela media ~240px de largura,
++        enquanto o círculo, nessa altura (y=292), tem só ~166px de vão. Resultado:
++        as pontas saíam pela borda dourada e apareciam cortadas.
++        A frase agora é um elemento tipográfico próprio do Hero — onde tem espaço
++        para respirar — e o selo fecha com a marca, que cabe com folga.
++      */}
++      <line x1="110" y1="272" x2="210" y2="272" stroke="url(#seal-gold)" strokeWidth="0.9" opacity="0.7" />
+       <text
+         x="160"
+-        y="292"
++        y="288"
++        dx="-1.4"
+         textAnchor="middle"
+         fill="#d4af37"
+-        fontSize="8.4"
+-        letterSpacing="3"
++        fontSize="8.6"
++        letterSpacing="2.8"
+         fontFamily="var(--font-mono), monospace"
+         opacity="0.9"
+       >
+-        PREPARE-SE PARA O NOVO CENÁRIO
++        B2B CONEXÕES
+       </text>
+     </svg>
+   );
+diff --git a/src/components/Footer.tsx b/src/components/Footer.tsx
+index b91204b..fa6c3b1 100644
+--- a/src/components/Footer.tsx
++++ b/src/components/Footer.tsx
+@@ -4,6 +4,7 @@ import PartnerRow from "./PartnerRow";
+ 
+ export default function Footer() {
+   const meta = [eventConfig.date, eventConfig.location].filter(Boolean).join(" · ");
++  const { prefix, name, url } = eventConfig.credit;
+ 
+   return (
+     <footer className="relative px-[22px] pb-10 pt-[clamp(60px,10vh,100px)]">
+@@ -30,11 +31,28 @@ export default function Footer() {
+           </Link>
+         </div>
+ 
+-        <div className="flex flex-wrap justify-between gap-4 font-[family-name:var(--font-mono)] text-[9px] tracking-[0.14em] text-[#3a445f]">
++        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 font-[family-name:var(--font-mono)] text-[9px] tracking-[0.14em] text-[#3a445f]">
+           <span>
+             © {eventConfig.edition} {eventConfig.brand.toUpperCase()}
+           </span>
+-          <span>{eventConfig.credit}</span>
++
++          {/* Assinatura discreta: uma linha, sem caixa, sem cor de anúncio.
++              Só o nome muda de cor no hover. */}
++          <span className="flex items-center gap-1.5">
++            {prefix}{" "}
++            {url ? (
++              <a
++                href={url}
++                target="_blank"
++                rel="noopener noreferrer"
++                className="border-b border-gold/25 pb-px text-[#7d8aa8] transition-colors duration-300 hover:border-gold hover:text-gold"
++              >
++                {name}
++              </a>
++            ) : (
++              <span className="text-[#7d8aa8]">{name}</span>
++            )}
++          </span>
+         </div>
+       </div>
+     </footer>
+diff --git a/src/components/Hero.tsx b/src/components/Hero.tsx
+index 736ce0d..0a163b1 100644
+--- a/src/components/Hero.tsx
++++ b/src/components/Hero.tsx
+@@ -17,6 +17,8 @@ export default function Hero({ photo }: { photo: Photo | null }) {
+ 
+   useEffect(() => {
+     if (reduced) return;
++    // Parallax de mouse só faz sentido em ponteiro fino: no celular seria
++    // peso de processamento sem nenhum efeito visível.
+     if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+     const onMove = (event: MouseEvent) => {
+       rawX.set((event.clientX / window.innerWidth - 0.5) * 50);
+@@ -38,78 +40,114 @@ export default function Hero({ photo }: { photo: Photo | null }) {
+   const meta = [eventConfig.date, eventConfig.location].filter(Boolean).join(" · ");
+ 
+   return (
+-    <section className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden px-[22px] pb-12 pt-28">
+-      {/* Foto de fundo, bem apagada: o protagonista é o dourado */}
++    <section className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden px-[22px] pb-12 pt-24 sm:pt-28">
++      {/* ---------------------------------------------------- fotografia de fundo */}
+       <div className="absolute inset-0 bg-navy">
+         {photo && (
+-          // eslint-disable-next-line @next/next/no-img-element
+-          <img
+-            src={photo.previewUrl}
+-            alt=""
+-            aria-hidden="true"
+-            className="h-full w-full object-cover opacity-40 saturate-[0.7]"
+-            fetchPriority="high"
+-          />
++          <motion.div
++            className="h-full w-full"
++            initial={{ scale: 1.06 }}
++            // Zoom lentíssimo (ken burns). Um transform puro: não repinta layout
++            // e o navegador resolve na GPU.
++            animate={reduced ? { scale: 1.06 } : { scale: 1.14 }}
++            transition={{ duration: 26, ease: "linear" }}
++          >
++            {/* eslint-disable-next-line @next/next/no-img-element */}
++            <img
++              src={photo.previewUrl}
++              alt=""
++              aria-hidden="true"
++              className="h-full w-full object-cover opacity-[0.34] saturate-[0.65]"
++              fetchPriority="high"
++            />
++          </motion.div>
+         )}
+       </div>
+ 
++      {/* Brilho dourado que segue o mouse de longe. */}
+       <motion.div
+         aria-hidden="true"
+         style={{ x, y }}
+-        className="animate-glow absolute left-1/2 top-[6%] -ml-[340px] h-[min(92vw,680px)] w-[min(92vw,680px)] rounded-full bg-[radial-gradient(circle,rgba(212,175,55,0.28),rgba(212,175,55,0)_66%)] blur-[26px]"
++        className="animate-glow absolute left-1/2 top-[4%] -ml-[340px] h-[min(92vw,680px)] w-[min(92vw,680px)] rounded-full bg-[radial-gradient(circle,rgba(212,175,55,0.26),rgba(212,175,55,0)_66%)] blur-[26px]"
+       />
+ 
++      {/* Duas camadas de escurecimento: gradiente vertical para a leitura do
++          texto + vinheta radial para dar profundidade de cinema às bordas. */}
+       <div
+         aria-hidden="true"
+-        className="absolute inset-0 bg-[linear-gradient(180deg,rgba(4,6,14,0.88)_0%,rgba(8,18,39,0.55)_38%,rgba(4,6,14,0.9)_78%,#04060e_100%)]"
++        className="absolute inset-0 bg-[linear-gradient(180deg,rgba(4,6,14,0.9)_0%,rgba(8,18,39,0.5)_38%,rgba(4,6,14,0.92)_78%,#04060e_100%)]"
+       />
++      <div aria-hidden="true" className="vignette absolute inset-0" />
+ 
+-      <div className="relative z-[2] mx-auto flex w-full max-w-[1180px] flex-col items-center gap-7 text-center">
++      <div className="relative z-[2] mx-auto flex w-full max-w-[1180px] flex-col items-center gap-6 text-center sm:gap-7">
+         <motion.div
+           initial={{ opacity: 0, scale: 0.92 }}
+           animate={{ opacity: 1, scale: 1 }}
+           transition={{ duration: 1.1, ease: EASE, delay: 0.15 }}
+-          className="w-[min(46vw,210px)] drop-shadow-[0_0_40px_rgba(212,175,55,0.22)]"
++          className="w-[min(42vw,190px)] drop-shadow-[0_0_40px_rgba(212,175,55,0.22)]"
+         >
+           <EventSeal className="h-auto w-full" />
+         </motion.div>
+ 
++        {/* A marca vem primeiro: a identidade do site é B2B CONEXÕES. */}
++        <motion.span
++          initial={{ opacity: 0, y: 14 }}
++          animate={{ opacity: 1, y: 0 }}
++          transition={{ duration: 0.8, ease: EASE, delay: 0.28 }}
++          className="text-[11px] font-bold tracking-[0.44em] text-white/95 sm:text-[13px]"
++        >
++          {eventConfig.brand.toUpperCase()}
++        </motion.span>
++
+         <motion.div
+           initial={{ opacity: 0, y: 16 }}
+           animate={{ opacity: 1, y: 0 }}
+-          transition={{ duration: 0.8, ease: EASE, delay: 0.35 }}
++          transition={{ duration: 0.8, ease: EASE, delay: 0.38 }}
+           className="flex items-center gap-3"
+         >
+-          <span className="h-px w-6 bg-gold/60" />
++          <span className="h-px w-6 bg-gold/60 sm:w-10" />
+           <span className="font-[family-name:var(--font-mono)] text-[9px] tracking-[0.24em] text-gold/85 sm:text-[10px]">
+             {eventConfig.hero.kicker}
+           </span>
+-          <span className="h-px w-6 bg-gold/60" />
++          <span className="h-px w-6 bg-gold/60 sm:w-10" />
+         </motion.div>
+ 
+         <motion.h1
+           initial={{ opacity: 0, y: 26 }}
+           animate={{ opacity: 1, y: 0 }}
+-          transition={{ duration: 1, ease: EASE, delay: 0.45 }}
++          transition={{ duration: 1, ease: EASE, delay: 0.48 }}
+           className="m-0 flex flex-col items-center gap-1"
+         >
+           <span className="text-[clamp(15px,4.6vw,30px)] font-semibold tracking-[0.34em] text-white/90">
+             {eventConfig.hero.titleTop}
+           </span>
+-          <span className="text-gold-gradient text-[clamp(34px,10.5vw,118px)] font-extrabold leading-[0.92] tracking-[-0.02em]">
++          {/* pb-[0.08em] evita que o recorte do degradê corte a base das letras
++              e dos acentos em telas de alta densidade. */}
++          <span className="text-gold-gradient block pb-[0.08em] text-[clamp(34px,10.5vw,118px)] font-extrabold leading-[0.95] tracking-[-0.02em]">
+             {eventConfig.hero.titleMain}
+           </span>
+         </motion.h1>
+ 
+-        <motion.p
++        {/*
++          "Prepare-se para o novo cenário." saiu de dentro do selo — onde não
++          cabia e aparecia cortada — e virou este bloco, com filete dourado e
++          espaço próprio. A frase é a promessa do evento: merece uma linha só
++          para ela.
++        */}
++        <motion.div
+           initial={{ opacity: 0, y: 20 }}
+           animate={{ opacity: 1, y: 0 }}
+-          transition={{ duration: 0.9, ease: EASE, delay: 0.66 }}
+-          className="m-0 max-w-[560px] text-[clamp(15px,3.6vw,20px)] leading-[1.45] text-white/85 text-pretty"
++          transition={{ duration: 0.9, ease: EASE, delay: 0.64 }}
++          className="flex w-full max-w-[620px] flex-col items-center gap-4"
+         >
+-          {eventConfig.hero.headline}{" "}
+-          <span className="text-muted">{eventConfig.hero.subheadline}</span>
+-        </motion.p>
++          <span aria-hidden="true" className="gold-rule w-[min(70%,220px)]" />
++          <p className="m-0 text-[clamp(17px,4.4vw,26px)] font-light leading-[1.25] tracking-[-0.01em] text-white text-balance">
++            {eventConfig.hero.headline}
++          </p>
++          <p className="m-0 max-w-[520px] text-[clamp(13px,3.2vw,15px)] leading-[1.6] text-muted text-pretty">
++            {eventConfig.hero.subheadline}
++          </p>
++        </motion.div>
+ 
+         {meta && (
+           <motion.span
+diff --git a/src/components/HighlightGallery.tsx b/src/components/HighlightGallery.tsx
+index da2ef40..c637245 100644
+--- a/src/components/HighlightGallery.tsx
++++ b/src/components/HighlightGallery.tsx
+@@ -33,7 +33,7 @@ export default function HighlightGallery({
+           </span>
+         </Reveal>
+ 
+-        <div className="grid auto-rows-[minmax(78px,auto)] grid-cols-6 gap-2.5">
++        <div className="grid auto-rows-[minmax(78px,auto)] grid-cols-6 gap-2.5 sm:auto-rows-[minmax(92px,auto)] sm:gap-3.5">
+           {photos.slice(0, SPANS.length).map((photo, index) => {
+             const album = albums[index % albums.length];
+             return (
+diff --git a/src/components/PhotoGrid.tsx b/src/components/PhotoGrid.tsx
+index 0251097..e08c2cc 100644
+--- a/src/components/PhotoGrid.tsx
++++ b/src/components/PhotoGrid.tsx
+@@ -155,7 +155,7 @@ export default function PhotoGrid({
+         )}
+       </AnimatePresence>
+ 
+-      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-2.5">
++      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))] gap-2.5 sm:gap-3.5">
+         {visible.map((photo, index) => (
+           <PhotoCard
+             key={photo.id}
+diff --git a/src/components/ScrollStory.tsx b/src/components/ScrollStory.tsx
+index 31d8341..5cbfa55 100644
+--- a/src/components/ScrollStory.tsx
++++ b/src/components/ScrollStory.tsx
+@@ -5,32 +5,57 @@ import ParallaxImage from "./ParallaxImage";
+ import Reveal from "./Reveal";
+ import type { AlbumWithPhotos } from "@/types";
+ 
++/**
++ * Os quatro capítulos editoriais do evento.
++ *
++ * Layout alternado: texto à esquerda / imagem à direita, e o contrário no
++ * capítulo seguinte. É o que dá ritmo de revista impressa em vez de "lista de
++ * seções". No celular tudo empilha na ordem natural de leitura.
++ *
++ * As fotos continuam vindo do Drive — nenhuma imagem fixa no código.
++ */
+ export default function ScrollStory({ albums }: { albums: AlbumWithPhotos[] }) {
+   return (
+     <section className="px-[22px]">
+-      <div className="mx-auto flex max-w-[1180px] flex-col gap-[clamp(90px,18vh,190px)] py-[clamp(70px,14vh,150px)]">
++      <div className="mx-auto flex max-w-[1180px] flex-col gap-[clamp(90px,17vh,180px)] py-[clamp(80px,15vh,160px)]">
+         {eventConfig.story.map((chapter, index) => {
+           const album = albums.length ? albums[index % albums.length] : null;
+           const photo = album?.photos[1] ?? album?.cover ?? null;
++          const flipped = index % 2 === 1;
+ 
+           return (
+-            <Reveal key={chapter.num} className="grid grid-cols-1 items-center gap-6">
+-              <div className="flex items-baseline gap-3.5">
+-                <span className="font-[family-name:var(--font-mono)] text-[11px] tracking-[0.18em] text-gold">
+-                  {chapter.num}
+-                </span>
+-                <h2 className="text-gold-gradient m-0 text-[clamp(32px,10vw,88px)] font-extrabold leading-[0.9] tracking-[-0.035em]">
++            <Reveal
++              key={chapter.num}
++              className="grid grid-cols-1 items-center gap-8 md:grid-cols-12 md:gap-12"
++            >
++              <div
++                className={`flex flex-col gap-5 md:col-span-5 ${
++                  flipped ? "md:order-2" : "md:order-1"
++                }`}
++              >
++                <div className="flex items-center gap-4">
++                  <span className="font-[family-name:var(--font-mono)] text-[11px] tracking-[0.18em] text-gold">
++                    {chapter.num}
++                  </span>
++                  <span aria-hidden="true" className="h-px flex-1 bg-gold/25" />
++                </div>
++
++                <h2 className="text-gold-gradient m-0 pb-[0.06em] text-[clamp(32px,9vw,72px)] font-extrabold leading-[0.92] tracking-[-0.035em]">
+                   {chapter.word}
+                 </h2>
++
++                <p className="m-0 max-w-[420px] text-[15px] leading-[1.7] text-muted text-pretty">
++                  {chapter.text}
++                </p>
+               </div>
+-              <p className="m-0 max-w-[460px] text-[15px] leading-relaxed text-muted text-pretty">
+-                {chapter.text}
+-              </p>
++
+               <ParallaxImage
+                 photo={photo}
+                 alt={`${chapter.word} — ${eventConfig.name}`}
+                 depth={0.1 + index * 0.02}
+-                className="aspect-[16/10] w-full rounded-[4px] border border-gold/12"
++                className={`aspect-[4/3] w-full rounded-[4px] border border-gold/12 md:col-span-7 md:aspect-[3/2] ${
++                  flipped ? "md:order-1" : "md:order-2"
++                }`}
+               />
+             </Reveal>
+           );
+diff --git a/src/components/StatsSection.tsx b/src/components/StatsSection.tsx
+index 11d3bb6..0cc9b5d 100644
+--- a/src/components/StatsSection.tsx
++++ b/src/components/StatsSection.tsx
+@@ -1,16 +1,27 @@
+ import AnimatedCounter from "./AnimatedCounter";
+ import type { Stat } from "@/types";
+ 
+-/** Os números vêm do que existe de verdade no Drive — nada é fixo no código. */
++/**
++ * Os números vêm do que existe de verdade no Drive — nada é fixo no código.
++ * (A lógica não mudou: só a apresentação, agora com filetes dourados separando
++ * as colunas, como numa página de revista.)
++ */
+ export default function StatsSection({ stats }: { stats: Stat[] }) {
+   return (
+-    <section className="relative px-[22px] py-[clamp(60px,10vh,110px)]">
++    <section className="relative px-[22px] py-[clamp(70px,11vh,120px)]">
+       <div className="gold-rule absolute inset-x-0 top-0" />
+       <div className="gold-rule absolute inset-x-0 bottom-0" />
+-      <div className="mx-auto grid max-w-[1180px] grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-10">
+-        {stats.map((stat) => (
+-          <div key={stat.label} className="flex flex-col gap-2">
++
++      <div className="mx-auto grid max-w-[1180px] grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-10 gap-y-12">
++        {stats.map((stat, index) => (
++          <div
++            key={stat.label}
++            className={`flex flex-col gap-3 ${
++              index > 0 ? "sm:border-l sm:border-gold/15 sm:pl-10" : ""
++            }`}
++          >
+             <AnimatedCounter value={stat.value} prefix={stat.prefix} />
++            <span aria-hidden="true" className="h-px w-8 bg-gold/45" />
+             <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.22em] text-muted">
+               {stat.label}
+             </span>
+diff --git a/src/config/event.ts b/src/config/event.ts
+index 984cb70..bf6e709 100644
+--- a/src/config/event.ts
++++ b/src/config/event.ts
+@@ -78,7 +78,20 @@ export const eventConfig: EventConfig = {
+     { id: "encerramento", name: "Encerramento", caption: "Certificados e brinde", folderId: "" },
+   ],
+ 
+-  credit: "Digital Experience by Gabriel Maia",
++  finalCta: {
++    lineOne: "OS MOMENTOS PASSAM.",
++    lineTwo: "AS CONEXÕES FICAM.",
++    button: "VER AS FOTOS",
++  },
++
++  credit: {
++    prefix: "Uma experiência digital desenvolvida pela",
++    name: "Simbionte",
++    // TODO: coloque aqui o link da Simbionte (site ou Instagram).
++    // Enquanto estiver vazio, o nome aparece em destaque mas sem link —
++    // nunca aponta para um endereço inventado.
++    url: "",
++  },
+ };
+ 
+ /** Fotos carregadas por vez na página de álbum. */
+diff --git a/src/config/uploads.ts b/src/config/uploads.ts
+new file mode 100644
+index 0000000..09924e4
+--- /dev/null
++++ b/src/config/uploads.ts
+@@ -0,0 +1,207 @@
++/**
++ * Fonte única de verdade sobre o que pode ser enviado.
++ *
++ * Este arquivo é importado pelo NAVEGADOR (painel de envio) e pelo SERVIDOR
++ * (rotas /api/admin/upload-session e /api/admin/upload). Manter a lista em um
++ * lugar só evita o caso clássico de o painel aceitar um formato que a rota
++ * recusa — e vice-versa.
++ *
++ * Regra de validação (a mesma nos dois lados):
++ *   1. a extensão precisa estar na lista abaixo;
++ *   2. quando o navegador informa um MIME type, ele precisa bater com a
++ *      extensão. MIME vazio é tolerado de propósito: Windows/Chrome entregam
++ *      `type: ""` para .HEIC e para vários .docx/.mov, e recusar por isso
++ *      derrubaria arquivos legítimos.
++ *
++ * Ou seja: nunca confiamos só na extensão, mas também não deixamos o MIME
++ * ausente bloquear o envio. Um arquivo perigoso (.exe, .js, .zip…) não passa
++ * porque a extensão dele simplesmente não existe aqui.
++ */
++
++export type FileKind = "imagem" | "video" | "documento";
++
++interface FormatSpec {
++  /** Extensões em minúsculo, sem o ponto. */
++  ext: string[];
++  /** MIME types aceitos para essas extensões. */
++  mimes: string[];
++  kind: FileKind;
++  /** Rótulo curto mostrado na fila do painel. */
++  label: string;
++}
++
++const FORMATS: FormatSpec[] = [
++  // ------------------------------------------------------------------ imagens
++  { ext: ["jpg", "jpeg"], mimes: ["image/jpeg", "image/jpg", "image/pjpeg"], kind: "imagem", label: "JPG" },
++  { ext: ["png"], mimes: ["image/png"], kind: "imagem", label: "PNG" },
++  { ext: ["webp"], mimes: ["image/webp"], kind: "imagem", label: "WEBP" },
++  {
++    ext: ["heic"],
++    // Safari manda "image/heic"; Chrome no Windows costuma mandar "" (vazio).
++    mimes: ["image/heic", "image/heic-sequence", "image/heif", "image/heif-sequence"],
++    kind: "imagem",
++    label: "HEIC",
++  },
++  {
++    ext: ["heif"],
++    mimes: ["image/heif", "image/heif-sequence", "image/heic", "image/heic-sequence"],
++    kind: "imagem",
++    label: "HEIF",
++  },
++
++  // ------------------------------------------------------------------- vídeos
++  { ext: ["mp4"], mimes: ["video/mp4", "application/mp4"], kind: "video", label: "MP4" },
++  { ext: ["mov"], mimes: ["video/quicktime", "video/mov", "video/x-quicktime"], kind: "video", label: "MOV" },
++  { ext: ["webm"], mimes: ["video/webm"], kind: "video", label: "WEBM" },
++
++  // -------------------------------------------------------------- documentos
++  { ext: ["pdf"], mimes: ["application/pdf"], kind: "documento", label: "PDF" },
++  { ext: ["doc"], mimes: ["application/msword"], kind: "documento", label: "DOC" },
++  {
++    ext: ["docx"],
++    mimes: [
++      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
++      "application/msword",
++    ],
++    kind: "documento",
++    label: "DOCX",
++  },
++  { ext: ["xls"], mimes: ["application/vnd.ms-excel"], kind: "documento", label: "XLS" },
++  {
++    ext: ["xlsx"],
++    mimes: [
++      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
++      "application/vnd.ms-excel",
++    ],
++    kind: "documento",
++    label: "XLSX",
++  },
++  { ext: ["ppt"], mimes: ["application/vnd.ms-powerpoint"], kind: "documento", label: "PPT" },
++  {
++    ext: ["pptx"],
++    mimes: [
++      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
++      "application/vnd.ms-powerpoint",
++    ],
++    kind: "documento",
++    label: "PPTX",
++  },
++];
++
++/** Índice extensão → especificação. Montado uma vez. */
++const BY_EXT = new Map<string, FormatSpec>();
++for (const spec of FORMATS) {
++  for (const ext of spec.ext) BY_EXT.set(ext, spec);
++}
++
++/**
++ * Limites de tamanho.
++ *
++ * MAX_UPLOAD_BYTES continua sendo o mesmo valor que a rota já usava (200 MB);
++ * só saiu de dentro do route.ts para poder ser lido também pelo painel, que
++ * agora avisa antes de enfileirar em vez de deixar o envio falhar no fim.
++ * MAX_FALLBACK_BYTES é o teto do caminho reserva (limite prático de 4,5 MB das
++ * functions da Vercel), idêntico ao que já existia.
++ */
++export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
++export const MAX_FALLBACK_BYTES = 4 * 1024 * 1024;
++
++/** "IMG_1024.HEIC" → "heic". Sem extensão devolve "". */
++export function extensionOf(name: string): string {
++  const match = /\.([a-z0-9]+)$/i.exec(name.trim());
++  return match ? match[1].toLowerCase() : "";
++}
++
++/** Troca a extensão preservando o resto do nome. */
++export function replaceExtension(name: string, nextExt: string): string {
++  const base = name.replace(/\.[^.]+$/, "");
++  return `${base}.${nextExt}`;
++}
++
++export function specFor(name: string): FormatSpec | null {
++  return BY_EXT.get(extensionOf(name)) ?? null;
++}
++
++export function kindOf(name: string): FileKind | null {
++  return specFor(name)?.kind ?? null;
++}
++
++/** Rótulo curto ("JPG", "MOV", "XLSX") para mostrar na fila. */
++export function labelOf(name: string): string {
++  return specFor(name)?.label ?? extensionOf(name).toUpperCase();
++}
++
++/**
++ * MIME "oficial" da extensão. Usado quando o navegador não informa nenhum —
++ * o Google Drive precisa de um Content-Type para abrir a sessão de upload.
++ */
++export function primaryMimeFor(name: string): string {
++  return specFor(name)?.mimes[0] ?? "application/octet-stream";
++}
++
++export interface Validation {
++  ok: boolean;
++  /** Mensagem pronta para o usuário quando `ok` é false. */
++  reason?: string;
++  kind?: FileKind;
++}
++
++/**
++ * Valida nome + MIME + tamanho. Usada nos dois lados (painel e rotas de API).
++ * `size` é opcional para permitir validar antes de conhecer o tamanho final.
++ */
++export function validateUpload(
++  name: string,
++  mimeType: string | undefined,
++  size?: number,
++  maxBytes: number = MAX_UPLOAD_BYTES,
++): Validation {
++  const ext = extensionOf(name);
++  if (!ext) {
++    return { ok: false, reason: "Arquivo sem extensão." };
++  }
++
++  const spec = BY_EXT.get(ext);
++  if (!spec) {
++    return { ok: false, reason: `Formato .${ext.toUpperCase()} não é aceito.` };
++  }
++
++  // MIME vazio é aceito (ver comentário no topo). MIME presente precisa bater.
++  const mime = (mimeType ?? "").trim().toLowerCase();
++  if (mime && !spec.mimes.includes(mime)) {
++    return {
++      ok: false,
++      reason: `O conteúdo do arquivo (${mime}) não corresponde à extensão .${ext.toUpperCase()}.`,
++    };
++  }
++
++  if (size !== undefined) {
++    if (size <= 0) return { ok: false, reason: "Arquivo vazio." };
++    if (size > maxBytes) {
++      return {
++        ok: false,
++        reason: `Arquivo acima de ${Math.round(maxBytes / (1024 * 1024))} MB.`,
++      };
++    }
++  }
++
++  return { ok: true, kind: spec.kind };
++}
++
++/** Valor do atributo `accept` do <input type="file">. */
++export const ACCEPT_ATTRIBUTE = [
++  ...FORMATS.flatMap((spec) => spec.ext.map((ext) => `.${ext}`)),
++  "image/*",
++  "video/*",
++  "application/pdf",
++].join(",");
++
++/** Listas legíveis para a interface. */
++export const FORMAT_SUMMARY: Record<FileKind, string> = {
++  imagem: "JPG · JPEG · PNG · WEBP · HEIC · HEIF",
++  video: "MP4 · MOV · WEBM",
++  documento: "PDF · DOC · DOCX · XLS · XLSX · PPT · PPTX",
++};
++
++/** Nome da subpasta onde o .HEIC original é preservado dentro do álbum. */
++export const ORIGINALS_FOLDER = "_originais";
+diff --git a/src/lib/drive.ts b/src/lib/drive.ts
+index 859f9b8..17e868e 100644
+--- a/src/lib/drive.ts
++++ b/src/lib/drive.ts
+@@ -272,6 +272,89 @@ export async function uploadMultipart(input: {
+   return (await res.json()) as { id: string; name: string };
+ }
+ 
++/** Escapa aspas e barras para uso dentro de uma query `name = "..."`. */
++function escapeQueryValue(value: string): string {
++  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
++}
++
++/**
++ * Devolve a subpasta com esse nome dentro de `parentId`, criando se não existir.
++ *
++ * Usada só para a pasta `_originais`, onde o .HEIC original é guardado quando o
++ * site publica a versão JPEG. Ela fica DENTRO da pasta do álbum, então:
++ *  - não aparece como álbum (álbuns são subpastas da pasta raiz, não do álbum);
++ *  - não aparece na galeria (`listFolderImages` só lista arquivos de imagem,
++ *    e uma pasta não tem MIME de imagem).
++ */
++export async function findOrCreateFolder(
++  name: string,
++  parentId: string,
++): Promise<{ id: string; name: string }> {
++  const params = new URLSearchParams({
++    q: [
++      `"${parentId}" in parents`,
++      `mimeType = "${FOLDER_MIME}"`,
++      `name = "${escapeQueryValue(name)}"`,
++      "trashed = false",
++    ].join(" and "),
++    fields: "files(id,name)",
++    pageSize: "1",
++    ...SHARED_DRIVE_PARAMS,
++  });
++
++  const data = await driveJson<{ files?: { id: string; name: string }[] }>(
++    `${API}/files?${params}`,
++  );
++  const existing = data.files?.[0];
++  if (existing) return existing;
++
++  return createFolder(name, parentId);
++}
++
++/**
++ * Todos os arquivos de uma pasta (imagens, vídeos e documentos), menos as
++ * subpastas.
++ *
++ * Existe só para o painel da organização: assim quem envia um vídeo ou um PDF
++ * consegue ver e remover o arquivo. A galeria pública continua usando
++ * `listFolderImages`, então nada além de foto aparece para o visitante.
++ */
++export async function listFolderFiles(
++  folderId: string,
++  revalidate = 0,
++): Promise<DriveFile[]> {
++  if (!folderId) return [];
++
++  const files: DriveFile[] = [];
++  let pageToken: string | undefined;
++
++  do {
++    const params = new URLSearchParams({
++      q: [
++        `"${folderId}" in parents`,
++        `mimeType != "${FOLDER_MIME}"`,
++        "trashed = false",
++      ].join(" and "),
++      fields:
++        "nextPageToken, files(id,name,mimeType,size,createdTime,imageMediaMetadata(width,height))",
++      orderBy: "name_natural",
++      pageSize: "200",
++      ...SHARED_DRIVE_PARAMS,
++    });
++    if (pageToken) params.set("pageToken", pageToken);
++
++    const data = await driveJson<{ files?: DriveFile[]; nextPageToken?: string }>(
++      `${API}/files?${params}`,
++      undefined,
++      revalidate,
++    );
++    files.push(...(data.files ?? []));
++    pageToken = data.nextPageToken;
++  } while (pageToken && files.length < 2000);
++
++  return files;
++}
++
+ /** Manda para a lixeira (reversível) em vez de apagar de vez. */
+ export async function trashFile(fileId: string): Promise<void> {
+   const params = new URLSearchParams({ fields: "id", ...SHARED_DRIVE_PARAMS });
+diff --git a/src/lib/heic.ts b/src/lib/heic.ts
+new file mode 100644
+index 0000000..f850377
+--- /dev/null
++++ b/src/lib/heic.ts
+@@ -0,0 +1,132 @@
++/**
++ * HEIC / HEIF → JPEG, inteiramente no navegador.
++ *
++ * Por que no navegador e não no servidor:
++ * o `sharp` que já roda em /api/photo usa o libvips pré-compilado, e essa
++ * build NÃO traz o decodificador HEIF (é um add-on com licença separada).
++ * Converter no servidor exigiria trocar o binário do sharp ou contratar um
++ * serviço de imagem — as duas coisas que o projeto não quer. Fazendo aqui, o
++ * custo é zero: nada de function, nada de cota, nada de mensalidade.
++ *
++ * Dois caminhos, nesta ordem:
++ *
++ *   1. `createImageBitmap` nativo. Safari (macOS/iOS) decodifica HEIC de
++ *      fábrica, então o iPhone e o Mac convertem sem baixar um byte a mais.
++ *
++ *   2. `heic2any` (wasm, ~1,4 MB) via import dinâmico. Só é baixado quando o
++ *      caminho 1 falha — Chrome e Firefox no Windows, tipicamente. Quem só
++ *      envia JPG nunca carrega esse pacote.
++ *
++ * Se os dois falharem, o arquivo é marcado como ERRO em vez de ser enviado
++ * como HEIC. Isso é intencional: um .heic dentro do álbum entra na listagem do
++ * Drive (o MIME dele começa com "image/"), mas nem o `sharp` nem o navegador
++ * conseguem exibi-lo — ele viraria uma foto quebrada na galeria pública.
++ */
++
++import { extensionOf } from "@/config/uploads";
++
++/** Detecta HEIC/HEIF por extensão ou por MIME. */
++export function isHeicLike(file: File): boolean {
++  const ext = extensionOf(file.name);
++  if (ext === "heic" || ext === "heif") return true;
++  const mime = (file.type || "").toLowerCase();
++  return mime.startsWith("image/heic") || mime.startsWith("image/heif");
++}
++
++/**
++ * Confirmação pelos bytes do arquivo (ISO-BMFF: "....ftyp<brand>").
++ * Usada só quando a extensão diz HEIC — serve para não gastar wasm com um
++ * arquivo renomeado à mão que na verdade é um JPEG.
++ */
++export async function sniffHeic(file: File): Promise<boolean> {
++  try {
++    const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
++    if (head.length < 12) return false;
++    const tag = String.fromCharCode(head[4], head[5], head[6], head[7]);
++    if (tag !== "ftyp") return false;
++    const brand = String.fromCharCode(head[8], head[9], head[10], head[11]).toLowerCase();
++    return ["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1"].includes(
++      brand,
++    );
++  } catch {
++    // Não conseguiu ler os bytes: deixa o fluxo normal decidir.
++    return false;
++  }
++}
++
++/** Carrega o heic2any uma única vez por sessão. */
++let heic2anyPromise: Promise<(options: {
++  blob: Blob;
++  toType?: string;
++  quality?: number;
++}) => Promise<Blob | Blob[]>> | null = null;
++
++function loadHeic2Any() {
++  if (!heic2anyPromise) {
++    heic2anyPromise = import("heic2any").then((mod) => {
++      // O pacote é UMD: dependendo do bundler vem em `.default` ou direto.
++      const candidate = (mod as unknown as { default?: unknown }).default ?? mod;
++      return candidate as (options: {
++        blob: Blob;
++        toType?: string;
++        quality?: number;
++      }) => Promise<Blob | Blob[]>;
++    });
++  }
++  return heic2anyPromise;
++}
++
++/** Caminho 1: decodificação nativa (Safari/iOS). Devolve null se indisponível. */
++async function convertWithBitmap(file: File, quality: number): Promise<Blob | null> {
++  if (typeof createImageBitmap !== "function") return null;
++
++  let bitmap: ImageBitmap;
++  try {
++    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
++  } catch {
++    return null;
++  }
++
++  try {
++    const canvas = document.createElement("canvas");
++    canvas.width = bitmap.width;
++    canvas.height = bitmap.height;
++    const context = canvas.getContext("2d");
++    if (!context) return null;
++    context.drawImage(bitmap, 0, 0);
++    return await new Promise<Blob | null>((resolve) =>
++      canvas.toBlob(resolve, "image/jpeg", quality),
++    );
++  } finally {
++    bitmap.close();
++  }
++}
++
++/** Caminho 2: wasm. Só é chamado quando o nativo não deu conta. */
++async function convertWithWasm(file: File, quality: number): Promise<Blob> {
++  const heic2any = await loadHeic2Any();
++  const result = await heic2any({ blob: file, toType: "image/jpeg", quality });
++  // Um HEIC "sequence" (live photo) devolve vários quadros: fica o primeiro.
++  const blob = Array.isArray(result) ? result[0] : result;
++  if (!blob) throw new Error("A conversão não produziu imagem.");
++  return blob;
++}
++
++/**
++ * Converte um HEIC/HEIF em JPEG. Lança com mensagem em português se não der.
++ * `quality` entre 0 e 1 — o painel passa o mesmo UPLOAD_QUALITY das outras fotos.
++ */
++export async function heicToJpeg(file: File, quality = 0.9): Promise<Blob> {
++  const native = await convertWithBitmap(file, quality);
++  if (native && native.size > 0) return native;
++
++  try {
++    return await convertWithWasm(file, quality);
++  } catch (error) {
++    console.error("[heic] conversão falhou", file.name, error);
++    throw new Error(
++      "Não foi possível converter este HEIC. Tente reenviar pelo iPhone com " +
++        "“Mais compatível” ligado em Ajustes → Câmera → Formatos.",
++    );
++  }
++}
+diff --git a/src/lib/optimize-image.ts b/src/lib/optimize-image.ts
+index 5ee7b32..24b4b9c 100644
+--- a/src/lib/optimize-image.ts
++++ b/src/lib/optimize-image.ts
+@@ -1,4 +1,5 @@
+ import { UPLOAD_MAX_EDGE, UPLOAD_QUALITY } from "@/config/event";
++import { replaceExtension } from "@/config/uploads";
+ 
+ export interface Optimized {
+   blob: Blob;
+@@ -14,9 +15,16 @@ export interface Optimized {
+  * ~700 KB em 2560px sem diferença visível na tela — e o álbum carrega mais
+  * rápido para quem vai ver. `imageOrientation: "from-image"` respeita o EXIF,
+  * senão fotos em pé chegariam deitadas.
++ *
++ * Aceita `Blob` além de `File` para poder receber o JPEG que sai da conversão
++ * de HEIC (que não é um File e não tem `.name`). O comportamento para `File`
++ * continua exatamente o mesmo de antes.
+  */
+-export async function optimizeImage(file: File): Promise<Optimized> {
+-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
++export async function optimizeImage(source: File | Blob, name?: string): Promise<Optimized> {
++  const sourceName = name ?? (source instanceof File ? source.name : "foto.jpg");
++  const sourceType = source.type || "image/jpeg";
++
++  const bitmap = await createImageBitmap(source, { imageOrientation: "from-image" });
+   const scale = Math.min(1, UPLOAD_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+ 
+   const width = Math.round(bitmap.width * scale);
+@@ -41,14 +49,14 @@ export async function optimizeImage(file: File): Promise<Optimized> {
+   if (!blob) throw new Error("Falha ao converter a imagem.");
+ 
+   // Se a compressão não ajudou (foto já pequena), manda o arquivo original.
+-  if (blob.size >= file.size) {
+-    return { blob: file, name: file.name, mimeType: file.type, originalSize: file.size };
++  if (blob.size >= source.size) {
++    return { blob: source, name: sourceName, mimeType: sourceType, originalSize: source.size };
+   }
+ 
+   return {
+     blob,
+-    name: file.name.replace(/\.[^.]+$/, "") + ".jpg",
++    name: replaceExtension(sourceName, "jpg"),
+     mimeType: "image/jpeg",
+-    originalSize: file.size,
++    originalSize: source.size,
+   };
+ }
+diff --git a/src/lib/prepare-upload.ts b/src/lib/prepare-upload.ts
+new file mode 100644
+index 0000000..7c988f6
+--- /dev/null
++++ b/src/lib/prepare-upload.ts
+@@ -0,0 +1,119 @@
++import { UPLOAD_QUALITY } from "@/config/event";
++import { kindOf, primaryMimeFor, replaceExtension, type FileKind } from "@/config/uploads";
++import { heicToJpeg, isHeicLike, sniffHeic } from "@/lib/heic";
++import { optimizeImage } from "@/lib/optimize-image";
++
++export interface Prepared {
++  /** Bytes que vão para o Drive. */
++  blob: Blob;
++  name: string;
++  mimeType: string;
++  kind: FileKind;
++  /** true quando o arquivo passou por HEIC/HEIF → JPEG. */
++  convertedFromHeic: boolean;
++  /**
++   * Arquivo original a preservar no Drive (subpasta `_originais` do álbum).
++   * Só é preenchido para HEIC/HEIF de verdade, e só se a opção estiver ligada.
++   */
++  preserveOriginal: File | null;
++}
++
++/**
++ * Deixa um arquivo pronto para o envio, decidindo o mínimo necessário:
++ *
++ *   HEIC/HEIF      → converte para JPEG (a galeria não exibe HEIC)
++ *   JPG/PNG/WEBP   → só redimensiona se a otimização estiver ligada
++ *   vídeo/documento → passa intacto, sem tocar nos bytes
++ *
++ * Nada de recomprimir JPEG por recomprimir — é o que o briefing pede e é
++ * também o que preserva qualidade.
++ */
++export async function prepareUpload(
++  file: File,
++  options: { optimize: boolean; keepHeicOriginal: boolean },
++): Promise<Prepared> {
++  const kind = kindOf(file.name) ?? "documento";
++
++  // --------------------------------------------------- vídeos e documentos
++  // Passam direto. Recomprimir ou reempacotar aqui só destruiria qualidade e
++  // gastaria memória do navegador à toa.
++  if (kind !== "imagem") {
++    return {
++      blob: file,
++      name: file.name,
++      mimeType: file.type || primaryMimeFor(file.name),
++      kind,
++      convertedFromHeic: false,
++      preserveOriginal: null,
++    };
++  }
++
++  // -------------------------------------------------------------- HEIC/HEIF
++  if (isHeicLike(file)) {
++    // `heicToJpeg` tenta primeiro o decodificador nativo — que também dá conta
++    // de um arquivo com extensão .heic que na verdade é JPEG — e só cai no
++    // wasm quando é HEIC de verdade em navegador sem suporte.
++    const jpeg = await heicToJpeg(file, UPLOAD_QUALITY);
++    const jpegName = replaceExtension(file.name, "jpg");
++
++    // Só preserva o original se os bytes forem mesmo de um contêiner HEIC.
++    const isRealHeic = options.keepHeicOriginal ? await sniffHeic(file) : false;
++    const preserveOriginal = isRealHeic ? file : null;
++
++    if (options.optimize) {
++      try {
++        // Otimiza o JPEG já convertido — nunca o HEIC. Isso é importante:
++        // `optimizeImage` devolve a fonte intacta quando a compressão não
++        // compensa, e devolver o HEIC aqui recolocaria o formato quebrado.
++        const optimized = await optimizeImage(jpeg, jpegName);
++        return {
++          blob: optimized.blob,
++          name: optimized.name,
++          mimeType: optimized.mimeType,
++          kind: "imagem",
++          convertedFromHeic: true,
++          preserveOriginal,
++        };
++      } catch (error) {
++        console.warn("[upload] otimização do HEIC convertido indisponível", file.name, error);
++      }
++    }
++
++    return {
++      blob: jpeg,
++      name: jpegName,
++      mimeType: "image/jpeg",
++      kind: "imagem",
++      convertedFromHeic: true,
++      preserveOriginal,
++    };
++  }
++
++  // ----------------------------------------------- JPG / JPEG / PNG / WEBP
++  if (options.optimize) {
++    try {
++      const optimized = await optimizeImage(file);
++      return {
++        blob: optimized.blob,
++        name: optimized.name,
++        mimeType: optimized.mimeType,
++        kind: "imagem",
++        convertedFromHeic: false,
++        preserveOriginal: null,
++      };
++    } catch (error) {
++      // Formato que o navegador não decodifica: envia como veio em vez de
++      // perder a foto. Era o comportamento anterior e continua valendo.
++      console.warn("[upload] otimização indisponível", file.name, error);
++    }
++  }
++
++  return {
++    blob: file,
++    name: file.name,
++    mimeType: file.type || primaryMimeFor(file.name),
++    kind: "imagem",
++    convertedFromHeic: false,
++    preserveOriginal: null,
++  };
++}
+diff --git a/src/lib/thumbnail.ts b/src/lib/thumbnail.ts
+new file mode 100644
+index 0000000..13dd56d
+--- /dev/null
++++ b/src/lib/thumbnail.ts
+@@ -0,0 +1,133 @@
++/**
++ * Miniaturas da fila de envio.
++ *
++ * Regra de ouro deste arquivo: NUNCA manter o arquivo inteiro decodificado na
++ * memória. Selecionar 300 fotos de 8 MB e criar um object URL apontando para
++ * cada original faria o navegador decodificar ~2,4 GB de bitmap ao rolar a
++ * lista. Aqui cada item vira um JPEG de 240px (~8 KB) e o object URL do
++ * original é liberado no mesmo instante.
++ *
++ * Todo object URL criado aqui precisa ser devolvido para `releaseThumbnail`.
++ */
++
++const THUMB_EDGE = 240;
++const THUMB_QUALITY = 0.6;
++/** Tempo máximo esperando o primeiro quadro de um vídeo. */
++const VIDEO_TIMEOUT_MS = 6000;
++
++function canvasToObjectUrl(canvas: HTMLCanvasElement): Promise<string | null> {
++  return new Promise((resolve) => {
++    canvas.toBlob(
++      (blob) => resolve(blob ? URL.createObjectURL(blob) : null),
++      "image/jpeg",
++      THUMB_QUALITY,
++    );
++  });
++}
++
++/** Miniatura de uma imagem já decodificável pelo navegador. */
++async function imageThumbnail(source: Blob): Promise<string | null> {
++  if (typeof createImageBitmap !== "function") return null;
++
++  try {
++    // `imageOrientation: "from-image"` respeita o EXIF — sem isso a miniatura
++    // de uma foto em pé apareceria deitada na fila.
++    const probe = await createImageBitmap(source, { imageOrientation: "from-image" });
++    const scale = Math.min(1, THUMB_EDGE / Math.max(probe.width, probe.height));
++    const width = Math.max(1, Math.round(probe.width * scale));
++    const height = Math.max(1, Math.round(probe.height * scale));
++
++    const canvas = document.createElement("canvas");
++    canvas.width = width;
++    canvas.height = height;
++    const context = canvas.getContext("2d");
++    if (!context) {
++      probe.close();
++      return null;
++    }
++    context.drawImage(probe, 0, 0, width, height);
++    probe.close();
++    return await canvasToObjectUrl(canvas);
++  } catch {
++    return null;
++  }
++}
++
++/** Primeiro quadro de um vídeo. Só carrega os primeiros bytes do arquivo. */
++async function videoThumbnail(file: Blob): Promise<string | null> {
++  const sourceUrl = URL.createObjectURL(file);
++  const video = document.createElement("video");
++  video.muted = true;
++  video.playsInline = true;
++  video.preload = "metadata";
++  video.src = sourceUrl;
++
++  try {
++    const frame = await new Promise<string | null>((resolve) => {
++      const timer = window.setTimeout(() => finish(null), VIDEO_TIMEOUT_MS);
++
++      const finish = (value: string | null) => {
++        window.clearTimeout(timer);
++        video.onloadeddata = null;
++        video.onseeked = null;
++        video.onerror = null;
++        resolve(value);
++      };
++
++      const draw = () => {
++        try {
++          const scale = Math.min(1, THUMB_EDGE / Math.max(video.videoWidth, video.videoHeight));
++          const width = Math.max(1, Math.round(video.videoWidth * scale));
++          const height = Math.max(1, Math.round(video.videoHeight * scale));
++          const canvas = document.createElement("canvas");
++          canvas.width = width;
++          canvas.height = height;
++          const context = canvas.getContext("2d");
++          if (!context) return finish(null);
++          context.drawImage(video, 0, 0, width, height);
++          void canvasToObjectUrl(canvas).then(finish);
++        } catch {
++          finish(null);
++        }
++      };
++
++      video.onerror = () => finish(null);
++      video.onloadeddata = () => {
++        // Pula o primeiro instante: muito vídeo começa com um quadro preto.
++        if (video.duration && video.duration > 0.3) {
++          video.onseeked = draw;
++          video.currentTime = Math.min(0.3, video.duration / 2);
++        } else {
++          draw();
++        }
++      };
++    });
++
++    return frame;
++  } catch {
++    return null;
++  } finally {
++    video.removeAttribute("src");
++    video.load();
++    URL.revokeObjectURL(sourceUrl);
++  }
++}
++
++/**
++ * Miniatura de um arquivo da fila. Devolve um object URL ou null quando o
++ * formato não tem pré-visualização possível (PDF, DOCX, HEIC ainda não
++ * convertido em navegador sem suporte…).
++ */
++export async function makeThumbnail(
++  source: Blob,
++  kind: "imagem" | "video" | "documento",
++): Promise<string | null> {
++  if (kind === "imagem") return imageThumbnail(source);
++  if (kind === "video") return videoThumbnail(source);
++  return null;
++}
++
++/** Libera a miniatura. Chamar sempre que o item sair da fila. */
++export function releaseThumbnail(url: string | null | undefined): void {
++  if (url) URL.revokeObjectURL(url);
++}
+diff --git a/src/types/heic2any.d.ts b/src/types/heic2any.d.ts
+new file mode 100644
+index 0000000..55ccc0c
+--- /dev/null
++++ b/src/types/heic2any.d.ts
+@@ -0,0 +1,22 @@
++/**
++ * Declaração local do `heic2any`.
++ *
++ * O pacote é UMD e publica os próprios tipos com `export =`, o que gera atrito
++ * com `moduleResolution: "bundler"` + `import()` dinâmico. Declarando aqui, o
++ * projeto compila do mesmo jeito independentemente da versão instalada — e o
++ * `src/lib/heic.ts` continua tratando `.default` e o módulo direto, para não
++ * depender de qual formato o bundler entrega em tempo de execução.
++ */
++declare module "heic2any" {
++  interface Heic2AnyOptions {
++    blob: Blob;
++    /** "image/jpeg" | "image/png" | "image/gif" */
++    toType?: string;
++    /** 0 a 1 */
++    quality?: number;
++    multiple?: boolean;
++    gifInterval?: number;
++  }
++
++  export default function heic2any(options: Heic2AnyOptions): Promise<Blob | Blob[]>;
++}
+diff --git a/src/types/index.ts b/src/types/index.ts
+index f4d7252..2be763a 100644
+--- a/src/types/index.ts
++++ b/src/types/index.ts
+@@ -68,7 +68,18 @@ export interface EventConfig {
+   albumCaptions: Record<string, string>;
+   /** Álbuns exibidos quando o Drive ainda não está conectado (modo demonstração). */
+   demoAlbums: Album[];
+-  credit: string;
++  /** Bloco de fechamento da home. */
++  finalCta: {
++    lineOne: string;
++    lineTwo: string;
++    button: string;
++  };
++  /** Assinatura discreta do rodapé. `url` vazio = texto sem link. */
++  credit: {
++    prefix: string;
++    name: string;
++    url: string;
++  };
+ }
+ 
+ export interface DriveFile {

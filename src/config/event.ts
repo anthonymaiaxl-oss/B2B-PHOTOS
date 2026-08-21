@@ -78,7 +78,20 @@ export const eventConfig: EventConfig = {
     { id: "encerramento", name: "Encerramento", caption: "Certificados e brinde", folderId: "" },
   ],
 
-  credit: "Digital Experience by Gabriel Maia",
+  finalCta: {
+    lineOne: "OS MOMENTOS PASSAM.",
+    lineTwo: "AS CONEXÕES FICAM.",
+    button: "VER AS FOTOS",
+  },
+
+  credit: {
+    prefix: "Uma experiência digital desenvolvida pela",
+    name: "Simbionte",
+    // TODO: coloque aqui o link da Simbionte (site ou Instagram).
+    // Enquanto estiver vazio, o nome aparece em destaque mas sem link —
+    // nunca aponta para um endereço inventado.
+    url: "",
+  },
 };
 
 /** Fotos carregadas por vez na página de álbum. */

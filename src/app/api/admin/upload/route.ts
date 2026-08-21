@@ -1,16 +1,19 @@
 import { guardAdmin } from "@/lib/admin-auth";
+import { MAX_FALLBACK_BYTES, validateUpload } from "@/config/uploads";
 import { uploadMultipart } from "@/lib/drive";
 import { isDriveConfigured } from "@/lib/google-auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-/** Limite prático das functions da Vercel (4,5 MB) com folga. */
-const MAX_BYTES = 4 * 1024 * 1024;
-
 /**
  * Caminho reserva: usado só se o envio direto para o Google falhar
  * (rede corporativa que bloqueia googleapis.com, por exemplo).
+ *
+ * O teto continua sendo o limite prático das functions da Vercel (4,5 MB) com
+ * folga — mesmo valor de antes, agora vindo de MAX_FALLBACK_BYTES. A checagem
+ * `file.type.startsWith("image/")` virou a allowlist compartilhada para que
+ * vídeo e documento também tenham caminho reserva.
  */
 export async function POST(request: Request) {
   const denied = await guardAdmin();
@@ -34,20 +37,23 @@ export async function POST(request: Request) {
   if (!(file instanceof File) || !folderId || !name) {
     return Response.json({ error: "Dados do arquivo incompletos." }, { status: 400 });
   }
-  if (!file.type.startsWith("image/")) {
-    return Response.json({ error: "Só é possível enviar imagens." }, { status: 415 });
-  }
-  if (file.size > MAX_BYTES) {
+
+  if (file.size > MAX_FALLBACK_BYTES) {
     return Response.json(
       { error: "Arquivo grande demais para o caminho reserva. Ative a otimização no envio." },
       { status: 413 },
     );
   }
 
+  const check = validateUpload(name, file.type, file.size, MAX_FALLBACK_BYTES);
+  if (!check.ok) {
+    return Response.json({ error: check.reason }, { status: 415 });
+  }
+
   try {
     const created = await uploadMultipart({
       name,
-      mimeType: file.type,
+      mimeType: file.type || "application/octet-stream",
       folderId,
       body: await file.arrayBuffer(),
     });

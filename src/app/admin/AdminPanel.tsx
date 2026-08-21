@@ -6,21 +6,43 @@ import {
   Check,
   CloudUpload,
   ExternalLink,
+  FileText,
+  Film,
   FolderPlus,
   HardDrive,
   Loader2,
   LogOut,
   RefreshCw,
+  RotateCcw,
   Trash2,
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import {
+  ACCEPT_ATTRIBUTE,
+  MAX_UPLOAD_BYTES,
+  kindOf,
+  labelOf,
+  primaryMimeFor,
+  validateUpload,
+  type FileKind,
+} from "@/config/uploads";
 import { formatBytes } from "@/lib/format";
-import { optimizeImage } from "@/lib/optimize-image";
+import { prepareUpload } from "@/lib/prepare-upload";
+import { makeThumbnail, releaseThumbnail } from "@/lib/thumbnail";
 import { uploadToDrive } from "@/lib/upload-client";
 
 /** Envios simultâneos. Mais que isso e o navegador começa a enfileirar sozinho. */
 const CONCURRENCY = 3;
+
+/**
+ * Miniaturas geradas por seleção. Acima disso os itens mostram só o bloco com
+ * a extensão: com 300 fotos na fila, gerar 300 miniaturas trava a interface e
+ * o ganho visual é nenhum (ninguém rola 300 linhas conferindo thumbnail).
+ */
+const THUMBNAIL_BUDGET = 80;
+/** Miniaturas geradas em paralelo. Duas já saturam o decodificador. */
+const THUMBNAIL_CONCURRENCY = 2;
 
 interface AlbumRow {
   id: string;
@@ -38,22 +60,35 @@ interface Status {
   quota: { limit: number | null; usage: number; usageInDrive: number } | null;
 }
 
-type ItemState = "aguardando" | "otimizando" | "enviando" | "pronto" | "erro";
+type ItemState = "aguardando" | "convertendo" | "enviando" | "concluido" | "erro";
+
+const STATE_LABEL: Record<ItemState, string> = {
+  aguardando: "Aguardando",
+  convertendo: "Convertendo…",
+  enviando: "Enviando…",
+  concluido: "Concluído",
+  erro: "Erro",
+};
 
 interface QueueItem {
   key: string;
   file: File;
+  kind: FileKind;
+  label: string;
   progress: number;
   state: ItemState;
   error?: string;
   finalSize?: number;
+  thumbUrl?: string | null;
+  convertedFromHeic?: boolean;
 }
 
-interface AdminPhoto {
+interface AdminFile {
   id: string;
   name: string;
   size: number;
-  thumbnailUrl: string;
+  kind: FileKind;
+  thumbnailUrl: string | null;
 }
 
 export default function AdminPanel() {
@@ -63,22 +98,65 @@ export default function AdminPanel() {
   const [status, setStatus] = useState<Status | null>(null);
   const [albums, setAlbums] = useState<AlbumRow[]>([]);
   const [albumId, setAlbumId] = useState("");
-  const [photos, setPhotos] = useState<AdminPhoto[]>([]);
+  const [files, setFiles] = useState<AdminFile[]>([]);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [optimize, setOptimize] = useState(true);
+  const [keepOriginals, setKeepOriginals] = useState(true);
   const [newAlbum, setNewAlbum] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [running, setRunning] = useState(false);
+
+  /** Espelho da fila para os workers lerem o estado atual sem closure velha. */
+  const queueRef = useRef<QueueItem[]>([]);
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+
+  /** Todo object URL criado precisa ser revogado — aqui ficam os pendentes. */
+  const objectUrls = useRef<Set<string>>(new Set());
+  /** Id da subpasta `_originais` já resolvida, por álbum. */
+  const originalsCache = useRef<Map<string, string>>(new Map());
+  /** Evita contar entrada/saída de elementos filhos no drag and drop. */
+  const dragDepth = useRef(0);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    const urls = objectUrls.current;
+    return () => {
+      mounted.current = false;
+      // Libera a memória das miniaturas ao sair do painel.
+      for (const url of urls) releaseThumbnail(url);
+      urls.clear();
+    };
+  }, []);
 
   const album = useMemo(
     () => albums.find((item) => item.folderId === albumId) ?? null,
     [albums, albumId],
   );
-  const uploading = queue.some(
-    (item) => item.state === "enviando" || item.state === "otimizando",
-  );
+
+  const totals = useMemo(() => {
+    const total = queue.length;
+    const done = queue.filter((item) => item.state === "concluido").length;
+    const failed = queue.filter((item) => item.state === "erro").length;
+    const pending = queue.filter(
+      (item) => item.state === "aguardando" || item.state === "erro",
+    ).length;
+    // Progresso geral: item concluído vale 1, item com erro vale 0, o resto
+    // entra com a fração real de bytes já enviados.
+    const fraction = total
+      ? queue.reduce((sum, item) => {
+          if (item.state === "concluido") return sum + 1;
+          if (item.state === "erro") return sum;
+          return sum + item.progress;
+        }, 0) / total
+      : 0;
+    return { total, done, failed, pending, fraction };
+  }, [queue]);
 
   /* ------------------------------------------------------------- carregamento */
 
@@ -106,15 +184,15 @@ export default function AdminPanel() {
     );
   }, []);
 
-  const loadPhotos = useCallback(async (folderId: string) => {
+  const loadFiles = useCallback(async (folderId: string) => {
     if (!folderId) {
-      setPhotos([]);
+      setFiles([]);
       return;
     }
     const response = await fetch(`/api/admin/photos?folderId=${folderId}`);
     if (!response.ok) return;
-    const data = (await response.json()) as { photos?: AdminPhoto[] };
-    setPhotos(data.photos ?? []);
+    const data = (await response.json()) as { photos?: AdminFile[] };
+    setFiles(data.photos ?? []);
   }, []);
 
   useEffect(() => {
@@ -125,8 +203,8 @@ export default function AdminPanel() {
   }, [loadStatus, loadAlbums]);
 
   useEffect(() => {
-    void loadPhotos(albumId);
-  }, [albumId, loadPhotos]);
+    void loadFiles(albumId);
+  }, [albumId, loadFiles]);
 
   /* ------------------------------------------------------------------- ações */
 
@@ -173,102 +251,294 @@ export default function AdminPanel() {
     }
   };
 
-  const patch = (key: string, changes: Partial<QueueItem>) =>
+  const patch = useCallback((key: string, changes: Partial<QueueItem>) => {
     setQueue((current) =>
       current.map((item) => (item.key === key ? { ...item, ...changes } : item)),
     );
+  }, []);
 
-  const addFiles = (files: FileList | File[]) => {
-    const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
-    if (images.length === 0) {
-      setError("Selecione arquivos de imagem (JPG, PNG, HEIC…).");
-      return;
-    }
-    setError(null);
-    setQueue((current) => [
-      ...current,
-      ...images.map((file, index) => ({
-        key: `${Date.now()}-${index}-${file.name}`,
-        file,
-        progress: 0,
-        state: "aguardando" as ItemState,
-      })),
-    ]);
-  };
+  /* -------------------------------------------------------------- miniaturas */
 
-  const sendAll = async () => {
-    if (!album || uploading) return;
-    const pending = queue.filter(
-      (item) => item.state === "aguardando" || item.state === "erro",
-    );
-    if (pending.length === 0) return;
-
-    setError(null);
-    setNotice(null);
-
+  /**
+   * Gera as miniaturas em segundo plano, de poucas em poucas, para a seleção de
+   * dezenas de arquivos não travar a página.
+   */
+  const generateThumbnails = useCallback(async (keys: string[]) => {
     let cursor = 0;
     const worker = async () => {
-      while (cursor < pending.length) {
-        const item = pending[cursor++];
-        try {
-          patch(item.key, { state: "otimizando", progress: 0, error: undefined });
+      while (cursor < keys.length) {
+        const key = keys[cursor++];
+        if (!mounted.current) return;
+        const item = queueRef.current.find((entry) => entry.key === key);
+        if (!item || item.thumbUrl !== undefined) continue;
 
-          const original = {
-            blob: item.file as Blob,
-            name: item.file.name,
-            mimeType: item.file.type,
-            originalSize: item.file.size,
-          };
-
-          let prepared = original;
-          if (optimize) {
-            try {
-              prepared = await optimizeImage(item.file);
-            } catch (caught) {
-              // Formato que o navegador não decodifica (HEIC do iPhone, por
-              // exemplo): envia o arquivo como veio em vez de perder a foto.
-              console.warn("[upload] otimização indisponível", item.file.name, caught);
-            }
-          }
-
-          patch(item.key, { state: "enviando" });
-          await uploadToDrive(
-            prepared.blob,
-            {
-              name: prepared.name,
-              mimeType: prepared.mimeType,
-              folderId: album.folderId,
-            },
-            (fraction) => patch(item.key, { progress: fraction }),
-          );
-
-          patch(item.key, { state: "pronto", progress: 1, finalSize: prepared.blob.size });
-        } catch (caught) {
-          patch(item.key, {
-            state: "erro",
-            error: caught instanceof Error ? caught.message : "Falha no envio.",
-          });
+        const url = await makeThumbnail(item.file, item.kind);
+        if (!mounted.current) {
+          releaseThumbnail(url);
+          return;
         }
+        if (url) objectUrls.current.add(url);
+        patch(key, { thumbUrl: url });
       }
     };
+    await Promise.all(Array.from({ length: THUMBNAIL_CONCURRENCY }, worker));
+  }, [patch]);
 
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-
-    // Publica na hora, sem esperar o cache de 10 minutos vencer.
-    await fetch("/api/admin/revalidate", { method: "POST" }).catch(() => null);
-    await Promise.all([loadAlbums(), loadPhotos(album.folderId), loadStatus()]);
-    setNotice("Envio concluído. As fotos já estão no site.");
+  const dropThumbnail = (item: QueueItem) => {
+    if (item.thumbUrl) {
+      objectUrls.current.delete(item.thumbUrl);
+      releaseThumbnail(item.thumbUrl);
+    }
   };
 
-  const removePhoto = async (photo: AdminPhoto) => {
-    if (!window.confirm(`Remover “${photo.name}” do site?\n\nA foto vai para a lixeira do Google Drive e pode ser restaurada por lá.`)) {
+  /* ------------------------------------------------------------------- fila */
+
+  const addFiles = useCallback(
+    (incoming: FileList | File[]) => {
+      const list = Array.from(incoming);
+      if (list.length === 0) return;
+
+      const existing = new Set(
+        queueRef.current.map((item) => `${item.file.name}:${item.file.size}`),
+      );
+
+      const accepted: QueueItem[] = [];
+      const rejected: string[] = [];
+      let duplicates = 0;
+      const stamp = Date.now();
+      // Quantas miniaturas ainda cabem no orçamento, contando o que já está na fila.
+      const room = Math.max(0, THUMBNAIL_BUDGET - queueRef.current.length);
+
+      list.forEach((file, index) => {
+        const signature = `${file.name}:${file.size}`;
+        if (existing.has(signature)) {
+          duplicates += 1;
+          return;
+        }
+
+        const check = validateUpload(file.name, file.type, file.size, MAX_UPLOAD_BYTES);
+        if (!check.ok) {
+          rejected.push(`${file.name} — ${check.reason}`);
+          return;
+        }
+
+        existing.add(signature);
+        accepted.push({
+          key: `${stamp}-${index}-${file.name}`,
+          file,
+          kind: check.kind ?? kindOf(file.name) ?? "documento",
+          label: labelOf(file.name),
+          progress: 0,
+          state: "aguardando",
+          // undefined = miniatura ainda não tentada; null = não terá miniatura.
+          thumbUrl: accepted.length < room ? undefined : null,
+        });
+      });
+
+      if (accepted.length > 0) {
+        setQueue((current) => [...current, ...accepted]);
+
+        const withThumbs = accepted
+          .filter((item) => item.thumbUrl === undefined)
+          .map((item) => item.key);
+        if (withThumbs.length > 0) {
+          // Sem await: a fila já aparece na tela e as miniaturas vão chegando.
+          void generateThumbnails(withThumbs);
+        }
+      }
+
+      const problems: string[] = [];
+      if (rejected.length > 0) {
+        problems.push(
+          rejected.length === 1
+            ? rejected[0]
+            : `${rejected.length} arquivos recusados — ${rejected.slice(0, 2).join("; ")}${
+                rejected.length > 2 ? "…" : ""
+              }`,
+        );
+      }
+      if (accepted.length === 0 && duplicates > 0) {
+        problems.push("Esses arquivos já estão na fila.");
+      }
+      setError(problems.length > 0 ? problems.join(" ") : null);
+    },
+    [generateThumbnails],
+  );
+
+  /** Resolve (uma vez por álbum) a subpasta onde o HEIC original é guardado. */
+  const ensureOriginalsFolder = useCallback(async (albumFolderId: string) => {
+    const cached = originalsCache.current.get(albumFolderId);
+    if (cached) return cached;
+
+    const response = await fetch("/api/admin/originals-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ albumFolderId }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? "Falha ao preparar a pasta de originais.");
+
+    originalsCache.current.set(albumFolderId, data.folderId);
+    return data.folderId as string;
+  }, []);
+
+  const processItem = useCallback(
+    async (key: string, folderId: string): Promise<boolean> => {
+      const item = queueRef.current.find((entry) => entry.key === key);
+      if (!item) return false;
+
+      try {
+        // Vídeo e documento não passam por nenhum processamento: mostrar
+        // "Convertendo…" para eles seria mentira na tela.
+        patch(key, {
+          state: item.kind === "imagem" ? "convertendo" : "enviando",
+          progress: 0,
+          error: undefined,
+        });
+
+        const prepared = await prepareUpload(item.file, {
+          optimize,
+          keepHeicOriginal: keepOriginals,
+        });
+
+        // Depois da conversão o HEIC virou JPEG: agora dá para ter miniatura.
+        if (item.thumbUrl == null && prepared.kind === "imagem" && prepared.convertedFromHeic) {
+          const url = await makeThumbnail(prepared.blob, "imagem");
+          if (url) {
+            if (mounted.current) {
+              objectUrls.current.add(url);
+              patch(key, { thumbUrl: url });
+            } else {
+              releaseThumbnail(url);
+            }
+          }
+        }
+
+        patch(key, { state: "enviando", convertedFromHeic: prepared.convertedFromHeic });
+
+        await uploadToDrive(
+          prepared.blob,
+          { name: prepared.name, mimeType: prepared.mimeType, folderId },
+          (fraction) => patch(key, { progress: fraction }),
+        );
+
+        // O .HEIC original vai para `_originais`, fora da galeria.
+        if (prepared.preserveOriginal) {
+          const original = prepared.preserveOriginal;
+          try {
+            const originalsId = await ensureOriginalsFolder(folderId);
+            await uploadToDrive(
+              original,
+              {
+                name: original.name,
+                mimeType: original.type || primaryMimeFor(original.name),
+                folderId: originalsId,
+              },
+              () => {},
+            );
+          } catch (caught) {
+            // A foto visível já subiu: guardar o original é um extra, não pode
+            // transformar um envio bem-sucedido em erro.
+            console.warn("[upload] não foi possível guardar o original", original.name, caught);
+          }
+        }
+
+        patch(key, { state: "concluido", progress: 1, finalSize: prepared.blob.size });
+        return true;
+      } catch (caught) {
+        patch(key, {
+          state: "erro",
+          progress: 0,
+          error: caught instanceof Error ? caught.message : "Falha no envio.",
+        });
+        return false;
+      }
+    },
+    [ensureOriginalsFolder, keepOriginals, optimize, patch],
+  );
+
+  /** Roda um conjunto de itens com paralelismo controlado. */
+  const runKeys = useCallback(
+    async (keys: string[]) => {
+      if (!album || keys.length === 0 || running) return;
+
+      setRunning(true);
+      setError(null);
+      setNotice(null);
+
+      const folderId = album.folderId;
+      let cursor = 0;
+      // Contagem local: `queueRef` pode estar um render atrás quando o loop
+      // termina, e a mensagem final precisa do número certo.
+      let sent = 0;
+      let failed = 0;
+
+      const worker = async () => {
+        while (cursor < keys.length) {
+          const key = keys[cursor++];
+          const ok = await processItem(key, folderId);
+          if (ok) sent += 1;
+          else failed += 1;
+        }
+      };
+
+      try {
+        await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+        // Publica na hora, sem esperar o cache de 10 minutos vencer.
+        await fetch("/api/admin/revalidate", { method: "POST" }).catch(() => null);
+        await Promise.all([loadAlbums(), loadFiles(folderId), loadStatus()]);
+
+        setNotice(
+          failed > 0
+            ? `${sent} arquivo(s) enviado(s). ${failed} não foi(ram) enviado(s) — use “Tentar novamente”.`
+            : `${sent} arquivo${sent === 1 ? "" : "s"} enviado${sent === 1 ? "" : "s"} com sucesso.`,
+        );
+      } finally {
+        setRunning(false);
+      }
+    },
+    [album, loadAlbums, loadFiles, loadStatus, processItem, running],
+  );
+
+  const sendAll = () =>
+    runKeys(
+      queueRef.current
+        .filter((item) => item.state === "aguardando" || item.state === "erro")
+        .map((item) => item.key),
+    );
+
+  const retryFailed = () =>
+    runKeys(queueRef.current.filter((item) => item.state === "erro").map((item) => item.key));
+
+  const retryOne = (key: string) => runKeys([key]);
+
+  const removeItem = (key: string) => {
+    const item = queueRef.current.find((entry) => entry.key === key);
+    if (item) dropThumbnail(item);
+    setQueue((current) => current.filter((entry) => entry.key !== key));
+  };
+
+  const clearDone = () => {
+    for (const item of queueRef.current) {
+      if (item.state === "concluido") dropThumbnail(item);
+    }
+    setQueue((current) => current.filter((item) => item.state !== "concluido"));
+  };
+
+  const removeFile = async (file: AdminFile) => {
+    if (
+      !window.confirm(
+        `Remover “${file.name}” do site?\n\nO arquivo vai para a lixeira do Google Drive e pode ser restaurado por lá.`,
+      )
+    ) {
       return;
     }
-    setBusy(photo.id);
+    setBusy(file.id);
     try {
-      const response = await fetch(`/api/admin/photos?id=${photo.id}`, { method: "DELETE" });
+      const response = await fetch(`/api/admin/photos?id=${file.id}`, { method: "DELETE" });
       if (!response.ok) throw new Error((await response.json()).error);
-      setPhotos((current) => current.filter((item) => item.id !== photo.id));
+      setFiles((current) => current.filter((item) => item.id !== file.id));
       await fetch("/api/admin/revalidate", { method: "POST" }).catch(() => null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao remover.");
@@ -470,47 +740,83 @@ export default function AdminPanel() {
 
           {/* ------------------------------------------------------------ envio */}
           <section className={`${card} flex flex-col gap-5`}>
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <h2 className="m-0 text-lg font-bold text-white">
-                Enviar fotos{album ? ` para ${album.name}` : ""}
+                Enviar arquivos{album ? ` para ${album.name}` : ""}
               </h2>
-              <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-muted">
-                <input
-                  type="checkbox"
-                  checked={optimize}
-                  onChange={(event) => setOptimize(event.target.checked)}
-                  className="h-4 w-4 accent-[#d4af37]"
-                />
-                Otimizar para a web (recomendado)
-              </label>
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-muted">
+                  <input
+                    type="checkbox"
+                    checked={optimize}
+                    onChange={(event) => setOptimize(event.target.checked)}
+                    className="h-4 w-4 accent-[#d4af37]"
+                  />
+                  Otimizar para a web
+                </label>
+                <label
+                  className="flex cursor-pointer items-center gap-2.5 text-[13px] text-muted"
+                  title="O .HEIC original vai para a subpasta _originais do álbum. Ocupa cota extra no Drive."
+                >
+                  <input
+                    type="checkbox"
+                    checked={keepOriginals}
+                    onChange={(event) => setKeepOriginals(event.target.checked)}
+                    className="h-4 w-4 accent-[#d4af37]"
+                  />
+                  Guardar HEIC original
+                </label>
+              </div>
             </div>
 
+            {/* ------------------------------------------------ arraste e solte */}
             <div
-              onDragOver={(event) => {
+              onDragEnter={(event) => {
                 event.preventDefault();
+                dragDepth.current += 1;
                 setDragging(true);
               }}
-              onDragLeave={() => setDragging(false)}
+              onDragOver={(event) => {
+                event.preventDefault();
+                if (!dragging) setDragging(true);
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                dragDepth.current = Math.max(0, dragDepth.current - 1);
+                if (dragDepth.current === 0) setDragging(false);
+              }}
               onDrop={(event) => {
                 event.preventDefault();
+                dragDepth.current = 0;
                 setDragging(false);
                 addFiles(event.dataTransfer.files);
               }}
-              className={`flex flex-col items-center gap-4 rounded-xl border-2 border-dashed px-6 py-12 text-center transition-colors duration-300 ${
-                dragging ? "border-gold bg-gold/10" : "border-gold/25 bg-ink/40"
+              className={`relative flex flex-col items-center gap-3 rounded-xl border-2 border-dashed px-6 py-12 text-center transition-all duration-300 ${
+                dragging
+                  ? "scale-[1.01] border-gold bg-gold/10 shadow-[0_0_60px_-20px_rgba(212,175,55,0.6)]"
+                  : "border-gold/25 bg-ink/40"
               }`}
             >
-              <CloudUpload size={30} strokeWidth={1.3} className="text-gold" />
-              <p className="m-0 text-sm text-muted">
-                Arraste as fotos aqui — ou selecione do computador.
+              <CloudUpload
+                size={32}
+                strokeWidth={1.2}
+                className={`text-gold transition-transform duration-300 ${
+                  dragging ? "-translate-y-1 scale-110" : ""
+                }`}
+              />
+              <p className="m-0 font-[family-name:var(--font-mono)] text-[11px] tracking-[0.2em] text-white">
+                ARRASTE SEUS ARQUIVOS AQUI
               </p>
+              <p className="m-0 text-[13px] text-muted">ou clique para selecionar</p>
+
               <input
                 ref={inputRef}
                 type="file"
-                accept="image/*"
+                accept={ACCEPT_ATTRIBUTE}
                 multiple
                 onChange={(event) => {
                   if (event.target.files) addFiles(event.target.files);
+                  // Zera para permitir escolher o mesmo arquivo de novo.
                   event.target.value = "";
                 }}
                 className="hidden"
@@ -519,10 +825,19 @@ export default function AdminPanel() {
                 type="button"
                 onClick={() => inputRef.current?.click()}
                 disabled={!album}
-                className={`${chip} border-gold/40 text-gold hover:border-gold disabled:cursor-not-allowed disabled:opacity-40`}
+                className={`${chip} mt-1 border-gold/40 text-gold hover:border-gold disabled:cursor-not-allowed disabled:opacity-40`}
               >
-                ESCOLHER ARQUIVOS
+                {queue.length > 0 ? "ADICIONAR MAIS ARQUIVOS" : "ESCOLHER ARQUIVOS"}
               </button>
+
+              <p className="m-0 font-[family-name:var(--font-mono)] text-[9px] tracking-[0.16em] text-[#5b678a]">
+                FOTOS · VÍDEOS · DOCUMENTOS
+              </p>
+              <p className="m-0 max-w-[420px] text-[11px] leading-relaxed text-[#5b678a]">
+                JPG · PNG · WEBP · HEIC · HEIF · MP4 · MOV · WEBM · PDF · DOC · DOCX · XLS ·
+                XLSX · PPT · PPTX
+              </p>
+
               {!album && (
                 <span className="text-[12px] text-[#ffb4b4]">
                   Crie ou selecione um álbum antes de enviar.
@@ -530,97 +845,172 @@ export default function AdminPanel() {
               )}
             </div>
 
+            {/* ------------------------------------------------------- a fila */}
             {queue.length > 0 && (
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.16em] text-muted">
-                    {queue.filter((item) => item.state === "pronto").length}/{queue.length}{" "}
-                    ENVIADAS
-                  </span>
-                  <div className="flex flex-wrap gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setQueue((current) =>
-                          current.filter((item) => item.state !== "pronto"),
-                        )
-                      }
-                      disabled={uploading}
-                      className={`${chip} border-gold/20 text-muted hover:border-gold/60 hover:text-white disabled:opacity-40`}
-                    >
-                      LIMPAR CONCLUÍDAS
-                    </button>
-                    <button
-                      type="button"
-                      onClick={sendAll}
-                      disabled={!album || uploading}
-                      className={`${chip} border-gold bg-gradient-to-b from-gold-bright to-gold font-bold text-ink disabled:cursor-not-allowed disabled:opacity-40`}
-                    >
-                      {uploading ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        <CloudUpload size={14} strokeWidth={2} />
+              <div className="flex flex-col gap-4">
+                {/* progresso geral */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.16em] text-muted">
+                      {totals.done} / {totals.total} ARQUIVOS
+                      {totals.failed > 0 && (
+                        <span className="ml-2 text-[#ffb4b4]">· {totals.failed} COM ERRO</span>
                       )}
-                      {uploading ? "ENVIANDO…" : "ENVIAR TUDO"}
-                    </button>
+                    </span>
+
+                    <div className="flex flex-wrap gap-2.5">
+                      {totals.failed > 0 && !running && (
+                        <button
+                          type="button"
+                          onClick={retryFailed}
+                          className={`${chip} border-[#ff9d9d]/40 text-[#ffb4b4] hover:border-[#ff9d9d]`}
+                        >
+                          <RotateCcw size={13} strokeWidth={1.8} /> TENTAR NOVAMENTE
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={clearDone}
+                        disabled={running || totals.done === 0}
+                        className={`${chip} border-gold/20 text-muted hover:border-gold/60 hover:text-white disabled:opacity-40`}
+                      >
+                        LIMPAR CONCLUÍDAS
+                      </button>
+                      <button
+                        type="button"
+                        onClick={sendAll}
+                        disabled={!album || running || totals.pending === 0}
+                        className={`${chip} border-gold bg-gradient-to-b from-gold-bright to-gold font-bold text-ink disabled:cursor-not-allowed disabled:opacity-40`}
+                      >
+                        {running ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <CloudUpload size={14} strokeWidth={2} />
+                        )}
+                        {running ? "ENVIANDO…" : `ENVIAR ${totals.pending}`}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#101a33]">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-gold-deep via-gold to-gold-bright transition-[width] duration-300"
+                      style={{ width: `${Math.round(totals.fraction * 100)}%` }}
+                    />
                   </div>
                 </div>
 
-                <ul className="m-0 flex list-none flex-col gap-2 p-0">
+                {/* itens */}
+                <ul className="m-0 flex max-h-[420px] list-none flex-col gap-2 overflow-y-auto p-0 pr-1">
                   {queue.map((item) => (
                     <li
                       key={item.key}
-                      className="flex items-center gap-3 rounded-lg border border-gold/12 bg-ink/50 px-4 py-3"
+                      className={`flex items-center gap-3 rounded-lg border bg-ink/50 px-3 py-3 transition-colors duration-300 ${
+                        item.state === "erro"
+                          ? "border-[#ff9d9d]/35"
+                          : item.state === "concluido"
+                            ? "border-gold/25"
+                            : "border-gold/12"
+                      }`}
                     >
+                      {/* miniatura ou bloco com a extensão */}
+                      <span className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gold/15 bg-navy">
+                        {item.thumbUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={item.thumbUrl}
+                            alt=""
+                            aria-hidden="true"
+                            className="h-full w-full object-cover"
+                          />
+                        ) : item.kind === "video" ? (
+                          <Film size={16} strokeWidth={1.6} className="text-gold/70" />
+                        ) : item.kind === "documento" ? (
+                          <FileText size={16} strokeWidth={1.6} className="text-gold/70" />
+                        ) : (
+                          <span className="font-[family-name:var(--font-mono)] text-[8px] tracking-[0.08em] text-gold/70">
+                            {item.label}
+                          </span>
+                        )}
+                      </span>
+
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-3">
-                          <span className="truncate text-[13px] text-white">
-                            {item.file.name}
-                          </span>
+                          <span className="truncate text-[13px] text-white">{item.file.name}</span>
                           <span className="shrink-0 font-[family-name:var(--font-mono)] text-[10px] tracking-[0.1em] text-muted">
-                            {item.state === "pronto" && item.finalSize
+                            {item.state === "concluido" && item.finalSize
                               ? `${formatBytes(item.file.size)} → ${formatBytes(item.finalSize)}`
                               : formatBytes(item.file.size)}
                           </span>
                         </div>
+
+                        <div className="mt-1 flex items-center gap-2 font-[family-name:var(--font-mono)] text-[9px] tracking-[0.14em] text-[#5b678a]">
+                          <span className="text-gold/70">{item.label}</span>
+                          <span aria-hidden="true">•</span>
+                          <span
+                            className={
+                              item.state === "erro"
+                                ? "text-[#ffb4b4]"
+                                : item.state === "concluido"
+                                  ? "text-gold"
+                                  : ""
+                            }
+                          >
+                            {STATE_LABEL[item.state]}
+                          </span>
+                          {item.convertedFromHeic && item.state === "concluido" && (
+                            <>
+                              <span aria-hidden="true">•</span>
+                              <span className="text-gold/60">HEIC → JPG</span>
+                            </>
+                          )}
+                        </div>
+
                         <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[#101a33]">
                           <div
                             className={`h-full rounded-full transition-[width] duration-300 ${
                               item.state === "erro"
                                 ? "bg-[#ff9d9d]"
-                                : "bg-gradient-to-r from-gold-deep via-gold to-gold-bright"
+                                : item.state === "convertendo"
+                                  ? "animate-shimmer bg-gradient-to-r from-gold-deep via-gold-bright to-gold-deep"
+                                  : "bg-gradient-to-r from-gold-deep via-gold to-gold-bright"
                             }`}
                             style={{
                               width:
-                                item.state === "pronto"
+                                item.state === "concluido" || item.state === "erro"
                                   ? "100%"
-                                  : item.state === "erro"
+                                  : item.state === "convertendo"
                                     ? "100%"
                                     : `${Math.round(item.progress * 100)}%`,
                             }}
                           />
                         </div>
+
                         {item.error && (
-                          <span className="mt-1.5 block text-[11px] text-[#ffb4b4]">
+                          <span className="mt-1.5 block text-[11px] leading-relaxed text-[#ffb4b4]">
                             {item.error}
                           </span>
                         )}
                       </div>
 
-                      <span className="shrink-0">
-                        {item.state === "pronto" ? (
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        {item.state === "concluido" ? (
                           <Check size={16} className="text-gold" />
                         ) : item.state === "erro" ? (
-                          <AlertTriangle size={16} className="text-[#ff9d9d]" />
+                          <button
+                            type="button"
+                            onClick={() => retryOne(item.key)}
+                            disabled={running}
+                            aria-label={`Tentar enviar ${item.file.name} novamente`}
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-[#ff9d9d]/40 text-[#ffb4b4] transition-colors hover:border-[#ff9d9d] hover:bg-[#ff9d9d]/10 disabled:opacity-40"
+                          >
+                            <RotateCcw size={13} strokeWidth={1.8} />
+                          </button>
                         ) : item.state === "aguardando" ? (
                           <button
                             type="button"
                             aria-label={`Tirar ${item.file.name} da fila`}
-                            onClick={() =>
-                              setQueue((current) =>
-                                current.filter((entry) => entry.key !== item.key),
-                              )
-                            }
+                            onClick={() => removeItem(item.key)}
                             className="text-muted transition-colors hover:text-white"
                           >
                             <X size={15} />
@@ -636,41 +1026,55 @@ export default function AdminPanel() {
             )}
           </section>
 
-          {/* ------------------------------------------------ fotos já publicadas */}
+          {/* ------------------------------------------------ já publicado */}
           {album && (
             <section className={`${card} flex flex-col gap-4`}>
               <h2 className="m-0 text-lg font-bold text-white">
                 No ar em {album.name}{" "}
                 <span className="font-[family-name:var(--font-mono)] text-[11px] font-normal tracking-[0.14em] text-muted">
-                  {photos.length} FOTOS
+                  {files.length} ARQUIVO{files.length === 1 ? "" : "S"}
                 </span>
               </h2>
 
-              {photos.length === 0 ? (
+              {files.length === 0 ? (
                 <p className="m-0 text-sm text-muted">Este álbum ainda está vazio.</p>
               ) : (
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2">
-                  {photos.map((photo) => (
+                  {files.map((file) => (
                     <div
-                      key={photo.id}
+                      key={file.id}
                       className="group relative aspect-square overflow-hidden rounded-md border border-gold/12 bg-ink"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={photo.thumbnailUrl}
-                        alt={photo.name}
-                        loading="lazy"
-                        decoding="async"
-                        className="h-full w-full object-cover"
-                      />
+                      {file.thumbnailUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={file.thumbnailUrl}
+                          alt={file.name}
+                          loading="lazy"
+                          decoding="async"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span className="flex h-full w-full flex-col items-center justify-center gap-2 px-2 text-center">
+                          {file.kind === "video" ? (
+                            <Film size={20} strokeWidth={1.4} className="text-gold/70" />
+                          ) : (
+                            <FileText size={20} strokeWidth={1.4} className="text-gold/70" />
+                          )}
+                          <span className="w-full truncate font-[family-name:var(--font-mono)] text-[8px] tracking-[0.1em] text-muted">
+                            {labelOf(file.name)}
+                          </span>
+                        </span>
+                      )}
+
                       <button
                         type="button"
-                        onClick={() => removePhoto(photo)}
-                        disabled={busy === photo.id}
-                        aria-label={`Remover ${photo.name}`}
+                        onClick={() => removeFile(file)}
+                        disabled={busy === file.id}
+                        aria-label={`Remover ${file.name}`}
                         className="absolute right-1.5 top-1.5 flex h-8 w-8 items-center justify-center rounded-full border border-[#ff9d9d]/50 bg-ink/80 text-[#ffb4b4] backdrop-blur-sm transition-all duration-300 hover:bg-[#ff9d9d] hover:text-ink md:opacity-0 md:group-hover:opacity-100"
                       >
-                        {busy === photo.id ? (
+                        {busy === file.id ? (
                           <Loader2 size={13} className="animate-spin" />
                         ) : (
                           <Trash2 size={13} strokeWidth={1.8} />

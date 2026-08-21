@@ -68,7 +68,18 @@ export interface EventConfig {
   albumCaptions: Record<string, string>;
   /** Álbuns exibidos quando o Drive ainda não está conectado (modo demonstração). */
   demoAlbums: Album[];
-  credit: string;
+  /** Bloco de fechamento da home. */
+  finalCta: {
+    lineOne: string;
+    lineTwo: string;
+    button: string;
+  };
+  /** Assinatura discreta do rodapé. `url` vazio = texto sem link. */
+  credit: {
+    prefix: string;
+    name: string;
+    url: string;
+  };
 }
 
 export interface DriveFile {

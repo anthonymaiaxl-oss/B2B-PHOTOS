@@ -33,7 +33,7 @@ export default function HighlightGallery({
           </span>
         </Reveal>
 
-        <div className="grid auto-rows-[minmax(78px,auto)] grid-cols-6 gap-2.5">
+        <div className="grid auto-rows-[minmax(78px,auto)] grid-cols-6 gap-2.5 sm:auto-rows-[minmax(92px,auto)] sm:gap-3.5">
           {photos.slice(0, SPANS.length).map((photo, index) => {
             const album = albums[index % albums.length];
             return (

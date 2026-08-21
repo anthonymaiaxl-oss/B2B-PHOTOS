@@ -39,6 +39,12 @@ export default function AlbumCard({ album }: { album: AlbumWithPhotos }) {
           className="absolute inset-0 bg-[radial-gradient(circle_at_50%_92%,rgba(212,175,55,0.32),transparent_62%)] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
         />
 
+        {/* Filete dourado que corre no topo do card ao passar o mouse. */}
+        <span
+          aria-hidden="true"
+          className="absolute inset-x-0 top-0 h-px origin-left scale-x-0 bg-gradient-to-r from-transparent via-gold-bright to-transparent transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:scale-x-100"
+        />
+
         <span className="absolute inset-x-[18px] bottom-[18px] flex flex-col gap-1.5 transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:-translate-y-1.5">
           <span className="text-[19px] font-semibold tracking-[-0.01em] text-white">
             {album.name}

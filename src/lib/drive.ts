@@ -272,6 +272,89 @@ export async function uploadMultipart(input: {
   return (await res.json()) as { id: string; name: string };
 }
 
+/** Escapa aspas e barras para uso dentro de uma query `name = "..."`. */
+function escapeQueryValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
+ * Devolve a subpasta com esse nome dentro de `parentId`, criando se não existir.
+ *
+ * Usada só para a pasta `_originais`, onde o .HEIC original é guardado quando o
+ * site publica a versão JPEG. Ela fica DENTRO da pasta do álbum, então:
+ *  - não aparece como álbum (álbuns são subpastas da pasta raiz, não do álbum);
+ *  - não aparece na galeria (`listFolderImages` só lista arquivos de imagem,
+ *    e uma pasta não tem MIME de imagem).
+ */
+export async function findOrCreateFolder(
+  name: string,
+  parentId: string,
+): Promise<{ id: string; name: string }> {
+  const params = new URLSearchParams({
+    q: [
+      `"${parentId}" in parents`,
+      `mimeType = "${FOLDER_MIME}"`,
+      `name = "${escapeQueryValue(name)}"`,
+      "trashed = false",
+    ].join(" and "),
+    fields: "files(id,name)",
+    pageSize: "1",
+    ...SHARED_DRIVE_PARAMS,
+  });
+
+  const data = await driveJson<{ files?: { id: string; name: string }[] }>(
+    `${API}/files?${params}`,
+  );
+  const existing = data.files?.[0];
+  if (existing) return existing;
+
+  return createFolder(name, parentId);
+}
+
+/**
+ * Todos os arquivos de uma pasta (imagens, vídeos e documentos), menos as
+ * subpastas.
+ *
+ * Existe só para o painel da organização: assim quem envia um vídeo ou um PDF
+ * consegue ver e remover o arquivo. A galeria pública continua usando
+ * `listFolderImages`, então nada além de foto aparece para o visitante.
+ */
+export async function listFolderFiles(
+  folderId: string,
+  revalidate = 0,
+): Promise<DriveFile[]> {
+  if (!folderId) return [];
+
+  const files: DriveFile[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({
+      q: [
+        `"${folderId}" in parents`,
+        `mimeType != "${FOLDER_MIME}"`,
+        "trashed = false",
+      ].join(" and "),
+      fields:
+        "nextPageToken, files(id,name,mimeType,size,createdTime,imageMediaMetadata(width,height))",
+      orderBy: "name_natural",
+      pageSize: "200",
+      ...SHARED_DRIVE_PARAMS,
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const data = await driveJson<{ files?: DriveFile[]; nextPageToken?: string }>(
+      `${API}/files?${params}`,
+      undefined,
+      revalidate,
+    );
+    files.push(...(data.files ?? []));
+    pageToken = data.nextPageToken;
+  } while (pageToken && files.length < 2000);
+
+  return files;
+}
+
 /** Manda para a lixeira (reversível) em vez de apagar de vez. */
 export async function trashFile(fileId: string): Promise<void> {
   const params = new URLSearchParams({ fields: "id", ...SHARED_DRIVE_PARAMS });

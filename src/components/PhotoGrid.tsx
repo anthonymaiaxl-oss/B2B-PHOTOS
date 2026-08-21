@@ -155,7 +155,7 @@ export default function PhotoGrid({
         )}
       </AnimatePresence>
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-2.5">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))] gap-2.5 sm:gap-3.5">
         {visible.map((photo, index) => (
           <PhotoCard
             key={photo.id}

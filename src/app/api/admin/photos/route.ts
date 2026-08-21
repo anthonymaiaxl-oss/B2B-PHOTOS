@@ -1,11 +1,20 @@
 import { guardAdmin } from "@/lib/admin-auth";
-import { listFolderImages, trashFile } from "@/lib/drive";
+import { kindOf } from "@/config/uploads";
+import { listFolderFiles, trashFile } from "@/lib/drive";
 import { isDriveConfigured } from "@/lib/google-auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-/** Fotos de uma pasta, sem cache — o painel precisa do estado real agora. */
+/**
+ * Arquivos de uma pasta, sem cache — o painel precisa do estado real agora.
+ *
+ * Passou a usar `listFolderFiles` (tudo, menos subpastas) no lugar de
+ * `listFolderImages`. Motivo: agora que vídeo e documento podem ser enviados,
+ * eles precisam aparecer no painel para poderem ser conferidos e removidos.
+ * A galeria pública NÃO mudou — ela continua em `listFolderImages` e segue
+ * mostrando só fotos.
+ */
 export async function GET(request: Request) {
   const denied = await guardAdmin();
   if (denied) return denied;
@@ -20,14 +29,21 @@ export async function GET(request: Request) {
   }
 
   try {
-    const files = await listFolderImages(folderId, 0);
+    const files = await listFolderFiles(folderId, 0);
     return Response.json({
-      photos: files.map((file) => ({
-        id: file.id,
-        name: file.name,
-        size: file.size ? Number(file.size) : 0,
-        thumbnailUrl: `/api/photo/${file.id}?w=400`,
-      })),
+      photos: files.map((file) => {
+        const isImage = (file.mimeType ?? "").startsWith("image/");
+        return {
+          id: file.id,
+          name: file.name,
+          size: file.size ? Number(file.size) : 0,
+          kind: kindOf(file.name) ?? (isImage ? "imagem" : "documento"),
+          // Só imagem tem miniatura: /api/photo usa o sharp, que não abre
+          // vídeo nem PDF. Para os outros o painel desenha um bloco com a
+          // extensão em vez de pedir uma imagem que voltaria com erro.
+          thumbnailUrl: isImage ? `/api/photo/${file.id}?w=400` : null,
+        };
+      }),
     });
   } catch (error) {
     console.error("[admin/photos] GET", error);

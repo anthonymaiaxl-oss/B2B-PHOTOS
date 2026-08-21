@@ -58,16 +58,18 @@ export default function EventSeal({ className = "" }: { className?: string }) {
         opacity="0.6"
       />
 
-      {/* Faixa de texto circular, girando devagar */}
+      {/* Faixa de texto circular, girando devagar.
+          `textLength` + `lengthAdjust="spacing"` obrigam o texto a ocupar
+          exatamente a circunferência (2·π·122 ≈ 766). Sem isso o espaçamento
+          fixo somava mais de 1000px e as duas voltas se sobrepunham. */}
       <g className="animate-spin-slow" style={{ transformOrigin: "160px 160px" }}>
         <text
           fill="#d4af37"
-          fontSize="11.5"
-          letterSpacing="5.6"
+          fontSize="9.5"
           fontFamily="var(--font-mono), monospace"
-          opacity="0.85"
+          opacity="0.8"
         >
-          <textPath href="#seal-arc" startOffset="2%">
+          <textPath href="#seal-arc" startOffset="0%" textLength="758" lengthAdjust="spacing">
             CONHECIMENTO · NETWORKING · ESTRATÉGIA · CONHECIMENTO · NETWORKING · ESTRATÉGIA ·
           </textPath>
         </text>
@@ -90,9 +92,12 @@ export default function EventSeal({ className = "" }: { className?: string }) {
         <rect x="180" y="152" width="9" height="60" rx="1.5" />
       </g>
 
+      {/* dx compensa o espaçamento que o SVG adiciona DEPOIS da última letra:
+          sem isso o texto centralizado fica meio caractere à direita. */}
       <text
         x="160"
         y="140"
+        dx="-3.5"
         textAnchor="middle"
         fill="#ffffff"
         fontSize="15"
@@ -128,18 +133,27 @@ export default function EventSeal({ className = "" }: { className?: string }) {
         TRIBUTÁRIA
       </text>
 
-      <line x1="96" y1="276" x2="224" y2="276" stroke="url(#seal-gold)" strokeWidth="0.9" opacity="0.7" />
+      {/*
+        Aqui existia "PREPARE-SE PARA O NOVO CENÁRIO".
+        A frase tem 30 caracteres: no tamanho usado ela media ~240px de largura,
+        enquanto o círculo, nessa altura (y=292), tem só ~166px de vão. Resultado:
+        as pontas saíam pela borda dourada e apareciam cortadas.
+        A frase agora é um elemento tipográfico próprio do Hero — onde tem espaço
+        para respirar — e o selo fecha com a marca, que cabe com folga.
+      */}
+      <line x1="110" y1="272" x2="210" y2="272" stroke="url(#seal-gold)" strokeWidth="0.9" opacity="0.7" />
       <text
         x="160"
-        y="292"
+        y="288"
+        dx="-1.4"
         textAnchor="middle"
         fill="#d4af37"
-        fontSize="8.4"
-        letterSpacing="3"
+        fontSize="8.6"
+        letterSpacing="2.8"
         fontFamily="var(--font-mono), monospace"
         opacity="0.9"
       >
-        PREPARE-SE PARA O NOVO CENÁRIO
+        B2B CONEXÕES
       </text>
     </svg>
   );

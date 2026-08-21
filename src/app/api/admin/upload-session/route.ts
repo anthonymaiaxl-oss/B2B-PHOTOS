@@ -1,4 +1,5 @@
 import { guardAdmin } from "@/lib/admin-auth";
+import { MAX_UPLOAD_BYTES, validateUpload } from "@/config/uploads";
 import { createResumableSession } from "@/lib/drive";
 import { isDriveConfigured } from "@/lib/google-auth";
 
@@ -8,6 +9,13 @@ export const runtime = "nodejs";
  * Abre a sessão de upload no Google e devolve só a URL dela.
  * O navegador manda os bytes direto para o Google: nenhum arquivo passa por
  * aqui (sem o limite de 4,5 MB da Vercel) e o token continua no servidor.
+ *
+ * A validação deixou de ser `mimeType.startsWith("image/")` e passou a usar a
+ * allowlist de `src/config/uploads.ts` — a mesma do painel. Foi a mudança
+ * mínima necessária para aceitar vídeo e documento sem afrouxar a segurança:
+ * a extensão precisa estar na lista E o MIME informado precisa bater com ela.
+ * O teto de 200 MB é exatamente o que já existia aqui, só que agora vem da
+ * constante compartilhada.
  */
 export async function POST(request: Request) {
   const denied = await guardAdmin();
@@ -28,11 +36,12 @@ export async function POST(request: Request) {
   if (!name || !mimeType || !folderId || !size) {
     return Response.json({ error: "Dados do arquivo incompletos." }, { status: 400 });
   }
-  if (!mimeType.startsWith("image/")) {
-    return Response.json({ error: "Só é possível enviar imagens." }, { status: 415 });
-  }
-  if (size > 200 * 1024 * 1024) {
-    return Response.json({ error: "Arquivo acima de 200 MB." }, { status: 413 });
+
+  const check = validateUpload(name, mimeType, size, MAX_UPLOAD_BYTES);
+  if (!check.ok) {
+    // 413 para tamanho, 415 para formato — o painel usa isso na mensagem.
+    const tooLarge = size > MAX_UPLOAD_BYTES;
+    return Response.json({ error: check.reason }, { status: tooLarge ? 413 : 415 });
   }
 
   try {

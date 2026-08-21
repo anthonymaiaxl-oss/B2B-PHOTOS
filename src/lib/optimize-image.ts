@@ -1,4 +1,5 @@
 import { UPLOAD_MAX_EDGE, UPLOAD_QUALITY } from "@/config/event";
+import { replaceExtension } from "@/config/uploads";
 
 export interface Optimized {
   blob: Blob;
@@ -14,9 +15,16 @@ export interface Optimized {
  * ~700 KB em 2560px sem diferença visível na tela — e o álbum carrega mais
  * rápido para quem vai ver. `imageOrientation: "from-image"` respeita o EXIF,
  * senão fotos em pé chegariam deitadas.
+ *
+ * Aceita `Blob` além de `File` para poder receber o JPEG que sai da conversão
+ * de HEIC (que não é um File e não tem `.name`). O comportamento para `File`
+ * continua exatamente o mesmo de antes.
  */
-export async function optimizeImage(file: File): Promise<Optimized> {
-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+export async function optimizeImage(source: File | Blob, name?: string): Promise<Optimized> {
+  const sourceName = name ?? (source instanceof File ? source.name : "foto.jpg");
+  const sourceType = source.type || "image/jpeg";
+
+  const bitmap = await createImageBitmap(source, { imageOrientation: "from-image" });
   const scale = Math.min(1, UPLOAD_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
 
   const width = Math.round(bitmap.width * scale);
@@ -41,14 +49,14 @@ export async function optimizeImage(file: File): Promise<Optimized> {
   if (!blob) throw new Error("Falha ao converter a imagem.");
 
   // Se a compressão não ajudou (foto já pequena), manda o arquivo original.
-  if (blob.size >= file.size) {
-    return { blob: file, name: file.name, mimeType: file.type, originalSize: file.size };
+  if (blob.size >= source.size) {
+    return { blob: source, name: sourceName, mimeType: sourceType, originalSize: source.size };
   }
 
   return {
     blob,
-    name: file.name.replace(/\.[^.]+$/, "") + ".jpg",
+    name: replaceExtension(sourceName, "jpg"),
     mimeType: "image/jpeg",
-    originalSize: file.size,
+    originalSize: source.size,
   };
 }
