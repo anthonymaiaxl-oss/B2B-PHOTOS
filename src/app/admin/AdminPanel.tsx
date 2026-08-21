@@ -121,6 +121,16 @@ export default function AdminPanel() {
   const originalsCache = useRef<Map<string, string>>(new Map());
   /** Evita contar entrada/saída de elementos filhos no drag and drop. */
   const dragDepth = useRef(0);
+  /**
+   * Trava SÍNCRONA de envio.
+   *
+   * `setRunning(true)` só vira `running === true` no próximo render. Dois
+   * cliques rápidos em "ENVIAR" (ou um clique repetido porque nada pareceu
+   * acontecer) passavam os dois pela checagem e a fila inteira era percorrida
+   * duas vezes — cada foto subia duas vezes para o Drive. Um ref muda no
+   * mesmo instante e fecha essa janela.
+   */
+  const runningRef = useRef(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -460,11 +470,20 @@ export default function AdminPanel() {
   /** Roda um conjunto de itens com paralelismo controlado. */
   const runKeys = useCallback(
     async (keys: string[]) => {
-      if (!album || keys.length === 0 || running) return;
+      if (!album || keys.length === 0) return;
+      if (runningRef.current) return;
+      runningRef.current = true;
 
       setRunning(true);
       setError(null);
       setNotice(null);
+
+      // Segunda rede de proteção contra duplicata: nunca processa a mesma
+      // chave duas vezes na mesma rodada, nem um item que já concluiu.
+      const pending = Array.from(new Set(keys)).filter((key) => {
+        const item = queueRef.current.find((entry) => entry.key === key);
+        return item !== undefined && item.state !== "concluido";
+      });
 
       const folderId = album.folderId;
       let cursor = 0;
@@ -474,8 +493,8 @@ export default function AdminPanel() {
       let failed = 0;
 
       const worker = async () => {
-        while (cursor < keys.length) {
-          const key = keys[cursor++];
+        while (cursor < pending.length) {
+          const key = pending[cursor++];
           const ok = await processItem(key, folderId);
           if (ok) sent += 1;
           else failed += 1;
@@ -495,10 +514,11 @@ export default function AdminPanel() {
             : `${sent} arquivo${sent === 1 ? "" : "s"} enviado${sent === 1 ? "" : "s"} com sucesso.`,
         );
       } finally {
+        runningRef.current = false;
         setRunning(false);
       }
     },
-    [album, loadAlbums, loadFiles, loadStatus, processItem, running],
+    [album, loadAlbums, loadFiles, loadStatus, processItem],
   );
 
   const sendAll = () =>

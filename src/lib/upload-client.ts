@@ -8,6 +8,22 @@
  *
  * Caminho reserva: se essa chamada direta falhar (rede corporativa que bloqueia
  * googleapis.com, por exemplo), o arquivo sobe pela própria API do site.
+ *
+ * ------------------------------------------------------------------------
+ * CORREÇÃO DE DUPLICAÇÃO
+ *
+ * Antes, QUALQUER falha do envio direto disparava o caminho reserva na hora.
+ * O problema: o XHR também falha em situações em que o Google JÁ recebeu o
+ * arquivo inteiro (queda de rede depois do último byte, timeout na resposta,
+ * aba em segundo plano no celular). Nesses casos o reenvio criava uma segunda
+ * cópia no Drive — a foto aparecia duas vezes no álbum.
+ *
+ * Agora, antes de reenviar, perguntamos ao Google o que ele tem da sessão:
+ * um PUT com `Content-Range: bytes *\/TOTAL` e corpo vazio. É o mecanismo
+ * padrão do protocolo resumível.
+ *   200/201 → o arquivo está lá. Não reenvia nada.
+ *   308     → incompleto. Aí sim vale o caminho reserva.
+ * ------------------------------------------------------------------------
  */
 export async function uploadToDrive(
   blob: Blob,
@@ -36,9 +52,45 @@ export async function uploadToDrive(
     await putWithProgress(uploadUrl, blob, options.mimeType, onProgress);
     return { viaFallback: false };
   } catch (error) {
-    console.warn("[upload] envio direto falhou, usando o caminho reserva", error);
+    console.warn("[upload] envio direto falhou", error);
+
+    // Antes de reenviar: o Google chegou a guardar o arquivo?
+    const status = await queryResumableStatus(uploadUrl, blob.size);
+    if (status === "completo") {
+      console.info("[upload] o arquivo já estava no Drive — reenvio cancelado", options.name);
+      onProgress(1);
+      return { viaFallback: false };
+    }
+
     await uploadViaServer(blob, options, onProgress);
     return { viaFallback: true };
+  }
+}
+
+/**
+ * Pergunta ao Google quanto da sessão resumível já foi recebido.
+ * Se a própria consulta falhar (rede bloqueada), devolve "desconhecido" e o
+ * chamador segue para o caminho reserva — melhor uma cópia extra do que uma
+ * foto perdida.
+ */
+async function queryResumableStatus(
+  url: string,
+  size: number,
+): Promise<"completo" | "incompleto" | "desconhecido"> {
+  try {
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Range": `bytes */${size}` },
+    });
+
+    if (response.status === 200 || response.status === 201) return "completo";
+    if (response.status === 308) return "incompleto";
+    // 404: a sessão expirou sem nunca ter sido concluída.
+    if (response.status === 404) return "incompleto";
+    return "desconhecido";
+  } catch (error) {
+    console.warn("[upload] não foi possível consultar a sessão", error);
+    return "desconhecido";
   }
 }
 

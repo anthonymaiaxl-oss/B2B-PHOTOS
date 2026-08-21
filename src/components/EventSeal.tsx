@@ -6,6 +6,24 @@ import { eventConfig } from "@/config/event";
  *
  * Para usar a arte original: coloque o PNG em `public/selo.png` e ajuste
  * `sealImage` em `src/config/event.ts`.
+ *
+ * ---------------------------------------------------------------------------
+ * GEOMETRIA — por que os números são estes
+ *
+ * A faixa de texto circular corre num raio de 122. Com o corpo da fonte, ela
+ * ocupa de fato a coroa entre os raios ~113 e ~124. Ou seja: TODO o conteúdo
+ * central precisa caber num círculo de raio 110, e não nos 156 da borda.
+ *
+ * Isso é o que dava errado antes. "PREPARE-SE PARA O NOVO CENÁRIO" ficava em
+ * y=292 — em cima da faixa e larga demais para o vão — e por isso aparecia
+ * cortada. Trocar a frase pelo ano não resolveria: qualquer coisa entre
+ * y≈270 e y≈292 esbarra na faixa do mesmo jeito. Não existe "rodapé" dentro
+ * deste selo, então a área abaixo de TRIBUTÁRIA simplesmente ficou vazia e o
+ * conjunto foi recentrado.
+ *
+ * Regra para mexer aqui: um texto de largura L numa altura y só cabe se
+ *     L / 2  ≤  √(110² − (y − 160)²)
+ * ---------------------------------------------------------------------------
  */
 export default function EventSeal({ className = "" }: { className?: string }) {
   if (eventConfig.sealImage) {
@@ -34,6 +52,23 @@ export default function EventSeal({ className = "" }: { className?: string }) {
           <stop offset="60%" stopColor="#d4af37" />
           <stop offset="100%" stopColor="#8a6a1c" />
         </linearGradient>
+
+        {/*
+          Mesmo degradê, mas em coordenadas absolutas.
+
+          É obrigatório para os traços da balança: um degradê em
+          `objectBoundingBox` (o padrão) não tem como ser calculado quando a
+          caixa do elemento tem largura ou altura zero — e uma linha reta tem.
+          O resultado era o traço sumir: o selo mostrava dois triângulos
+          soltos, sem a haste nem os braços da balança.
+        */}
+        <linearGradient id="seal-gold-abs" gradientUnits="userSpaceOnUse" x1="0" y1="60" x2="0" y2="250">
+          <stop offset="0%" stopColor="#fdf3cf" />
+          <stop offset="26%" stopColor="#f6e3a1" />
+          <stop offset="60%" stopColor="#d4af37" />
+          <stop offset="100%" stopColor="#8a6a1c" />
+        </linearGradient>
+
         <radialGradient id="seal-bg" cx="50%" cy="34%" r="72%">
           <stop offset="0%" stopColor="#12244d" />
           <stop offset="62%" stopColor="#0a1329" />
@@ -47,13 +82,13 @@ export default function EventSeal({ className = "" }: { className?: string }) {
       </defs>
 
       <circle cx="160" cy="160" r="158" fill="url(#seal-bg)" />
-      <circle cx="160" cy="160" r="156" fill="none" stroke="url(#seal-gold)" strokeWidth="2.5" />
+      <circle cx="160" cy="160" r="156" fill="none" stroke="url(#seal-gold-abs)" strokeWidth="2.5" />
       <circle
         cx="160"
         cy="160"
         r="146"
         fill="none"
-        stroke="url(#seal-gold)"
+        stroke="url(#seal-gold-abs)"
         strokeWidth="0.8"
         opacity="0.6"
       />
@@ -75,45 +110,46 @@ export default function EventSeal({ className = "" }: { className?: string }) {
         </text>
       </g>
 
-      {/* Balança + linha de crescimento: o par que abre a arte oficial */}
-      <g stroke="url(#seal-gold)" fill="none" strokeWidth="2.2" strokeLinecap="round">
-        <path d="M160 78 v34" />
-        <path d="M132 92 h56" />
-        <path d="M132 92 l-11 22 h22 z" fill="url(#seal-gold)" stroke="none" />
-        <path d="M188 92 l-11 22 h22 z" fill="url(#seal-gold)" stroke="none" />
-        <path d="M146 116 h28" />
+      {/* Balança: haste, braços e base. */}
+      <g stroke="url(#seal-gold-abs)" fill="none" strokeWidth="2.2" strokeLinecap="round">
+        <path d="M160 66 v30" />
+        <path d="M134 78 h52" />
+        <path d="M148 100 h24" />
+      </g>
+      <g fill="url(#seal-gold-abs)">
+        <path d="M134 78 l-10 20 h20 z" />
+        <path d="M186 78 l-10 20 h20 z" />
       </g>
 
-      <g fill="url(#seal-gold)">
-        <rect x="128" y="196" width="9" height="16" rx="1.5" />
-        <rect x="141" y="188" width="9" height="24" rx="1.5" />
-        <rect x="154" y="178" width="9" height="34" rx="1.5" />
-        <rect x="167" y="166" width="9" height="46" rx="1.5" />
-        <rect x="180" y="152" width="9" height="60" rx="1.5" />
-      </g>
-
-      {/* dx compensa o espaçamento que o SVG adiciona DEPOIS da última letra:
-          sem isso o texto centralizado fica meio caractere à direita. */}
       <text
         x="160"
-        y="140"
-        dx="-3.5"
+        y="126"
+        dx="-2.75"
         textAnchor="middle"
         fill="#ffffff"
-        fontSize="15"
-        letterSpacing="7"
+        fontSize="14"
+        letterSpacing="5.5"
         fontWeight="600"
         fontFamily="var(--font-display), sans-serif"
       >
         MASTER CLASS
       </text>
 
+      {/* Barras de crescimento. */}
+      <g fill="url(#seal-gold-abs)">
+        <rect x="128" y="172" width="9" height="14" rx="1.5" />
+        <rect x="141" y="166" width="9" height="20" rx="1.5" />
+        <rect x="154" y="158" width="9" height="28" rx="1.5" />
+        <rect x="167" y="148" width="9" height="38" rx="1.5" />
+        <rect x="180" y="138" width="9" height="48" rx="1.5" />
+      </g>
+
       <text
         x="160"
-        y="238"
+        y="214"
         textAnchor="middle"
-        fill="url(#seal-gold)"
-        fontSize="21"
+        fill="url(#seal-gold-abs)"
+        fontSize="18.5"
         fontWeight="800"
         letterSpacing="0.5"
         fontFamily="var(--font-display), sans-serif"
@@ -122,38 +158,15 @@ export default function EventSeal({ className = "" }: { className?: string }) {
       </text>
       <text
         x="160"
-        y="262"
+        y="237"
         textAnchor="middle"
-        fill="url(#seal-gold)"
-        fontSize="21"
+        fill="url(#seal-gold-abs)"
+        fontSize="18.5"
         fontWeight="800"
         letterSpacing="0.5"
         fontFamily="var(--font-display), sans-serif"
       >
         TRIBUTÁRIA
-      </text>
-
-      {/*
-        Aqui existia "PREPARE-SE PARA O NOVO CENÁRIO".
-        A frase tem 30 caracteres: no tamanho usado ela media ~240px de largura,
-        enquanto o círculo, nessa altura (y=292), tem só ~166px de vão. Resultado:
-        as pontas saíam pela borda dourada e apareciam cortadas.
-        A frase agora é um elemento tipográfico próprio do Hero — onde tem espaço
-        para respirar — e o selo fecha com a marca, que cabe com folga.
-      */}
-      <line x1="110" y1="272" x2="210" y2="272" stroke="url(#seal-gold)" strokeWidth="0.9" opacity="0.7" />
-      <text
-        x="160"
-        y="288"
-        dx="-1.4"
-        textAnchor="middle"
-        fill="#d4af37"
-        fontSize="8.6"
-        letterSpacing="2.8"
-        fontFamily="var(--font-mono), monospace"
-        opacity="0.9"
-      >
-        B2B CONEXÕES
       </text>
     </svg>
   );
