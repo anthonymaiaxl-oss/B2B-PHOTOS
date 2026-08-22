@@ -12,7 +12,9 @@ export default function StatsSection({ stats }: { stats: Stat[] }) {
       <div className="gold-rule absolute inset-x-0 top-0" />
       <div className="gold-rule absolute inset-x-0 bottom-0" />
 
-      <div className="mx-auto grid max-w-[1180px] grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-10 gap-y-12">
+      {/* `gold-stagger`: os números ficam lado a lado, então a faixa de luz
+          passa em um de cada vez. Todos juntos viraria pisca-pisca. */}
+      <div className="gold-stagger mx-auto grid max-w-[1180px] grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-10 gap-y-12">
         {stats.map((stat, index) => (
           <div
             key={stat.label}

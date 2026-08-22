@@ -79,27 +79,43 @@ export const eventConfig: EventConfig = {
   ],
 
   /**
-   * IMAGENS FIXAS DAS SEÇÕES
+   * IMAGENS DAS SEÇÕES — hero, os quatro capítulos e o bloco final.
    *
-   * Coloque os arquivos em `public/secoes/` e escreva o caminho aqui começando
-   * com "/" (o `public/` não entra no caminho). Exemplo:
+   * Cada campo aceita três formas:
    *
-   *     hero: "/secoes/hero.jpg",
+   * 1) NOME DE UMA FOTO DO ÁLBUM  →  "IMG_1024.jpg"
+   *    Aponta uma foto real que já está no Drive. É a melhor opção: a imagem
+   *    sai em alta resolução, continua aparecendo na galeria e não duplica
+   *    arquivo nenhum no repositório. O nome é o mesmo que aparece na área da
+   *    organização; pode escrever com ou sem extensão, maiúscula não importa.
    *
-   * Campo vazio ("") = a seção volta ao comportamento dinâmico e usa uma foto
-   * real do álbum no Drive. É de propósito: assim que as fotos verdadeiras do
-   * evento estiverem no ar, basta apagar o caminho para o site passar a mostrar
-   * o registro real em vez de uma imagem ilustrativa.
+   * 2) ARQUIVO FIXO EM public/    →  "/secoes/hero.jpg"
+   *    Para imagem de layout que não é foto do evento. Coloque o arquivo em
+   *    public/secoes/ (o "public/" não entra no caminho). 1920×1080, JPG 80.
    *
-   * Tamanho recomendado: 1920×1080 (16:9), JPG de qualidade 80, até ~350 KB.
-   * Imagens muito maiores só deixam o site lento — elas ficam atrás de uma
-   * camada escura e de tipografia grande.
+   * 3) VAZIO ("")                 →  automático
+   *    O site escolhe uma foto do álbum sozinho. É o padrão.
+   *
+   * Se o nome apontado não existir mais (foto apagada do álbum), a seção volta
+   * sozinha para o automático em vez de ficar sem imagem.
    */
   sectionImages: {
+    // Fundos gráficos que vêm junto com o projeto, em public/secoes/.
+    // São composições abstratas (feixes de luz, arcos, malha de conexões,
+    // curva ascendente, luzes fora de foco) — NÃO são fotos do evento.
+    // Servem enquanto as fotos reais não estão escolhidas: troque qualquer
+    // um destes pelo nome de uma foto do álbum, ex. hero: "IMG_1024.jpg".
+    // VAZIO no topo = malha animada de conexões (HeroBackdrop). O topo NÃO
+    // aceita nome de foto do álbum: só caminho de public/, ex. "/secoes/x.jpg".
     hero: "",
     // ordem: 01 CONHECIMENTO, 02 NETWORKING, 03 ESTRATÉGIA, 04 MOMENTOS
-    story: ["", "", "", ""],
-    cta: "",
+    story: [
+      "/secoes/conhecimento.jpg",
+      "/secoes/networking.jpg",
+      "/secoes/estrategia.jpg",
+      "/secoes/momentos.jpg",
+    ],
+    cta: "/secoes/cta.jpg",
   },
 
   finalCta: {
