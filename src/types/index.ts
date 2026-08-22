@@ -84,6 +84,8 @@ export interface EventConfig {
     lineTwo: string;
     button: string;
   };
+  /** Palavras da abertura, em ordem. A última sai em ouro. */
+  intro: string[];
   /** Assinatura discreta do rodapé. `url` vazio = texto sem link. */
   credit: {
     prefix: string;

@@ -127,6 +127,15 @@ export const eventConfig: EventConfig = {
     button: "VER AS FOTOS",
   },
 
+  /**
+   * A sequência da abertura, na ordem em que as palavras aparecem.
+   *
+   * A ÚLTIMA fecha a apresentação e é a única que sai em ouro — as outras são
+   * o caminho até ela. Mexer na ordem muda o ritmo; a última deve ser sempre
+   * o nome do evento.
+   */
+  intro: ["REFORMA TRIBUTÁRIA", "CONHECIMENTO", "NETWORKING", "ESTRATÉGIA", "MASTER CLASS"],
+
   credit: {
     prefix: "Uma experiência digital desenvolvida pela",
     name: "Simbionte",
