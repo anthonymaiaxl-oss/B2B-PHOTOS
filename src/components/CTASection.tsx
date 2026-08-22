@@ -1,13 +1,23 @@
 import Link from "next/link";
 import { eventConfig } from "@/config/event";
+import HeroFlow from "./HeroFlow";
 import ParallaxImage from "./ParallaxImage";
 import Reveal from "./Reveal";
 import type { AlbumWithPhotos, Photo } from "@/types";
 
 /**
+ * O bloco final usa o mesmo fundo líquido do topo, e não imagem.
+ *
+ * Para voltar à imagem basta trocar para `false`: o campo `sectionImages.cta`
+ * volta a valer e o arquivo em `public/secoes/` continua no lugar.
+ */
+const FUNDO_ANIMADO = true;
+
+/**
  * Fechamento da home. O link continua indo para o primeiro álbum publicado —
  * mesma lógica de antes; só o texto e o desenho mudaram.
  */
+
 export default function CTASection({
   photo,
   albums,
@@ -19,16 +29,25 @@ export default function CTASection({
 
   return (
     <section className="relative flex min-h-[82svh] items-center overflow-hidden px-[22px]">
-      <ParallaxImage
-        photo={photo}
-        src={eventConfig.sectionImages.cta || undefined}
-        alt=""
-        depth={0.14}
-        className="absolute inset-0"
-      />
+      {FUNDO_ANIMADO ? (
+        <HeroFlow className="absolute inset-0 h-full w-full" />
+      ) : (
+        <ParallaxImage
+          photo={photo}
+          src={eventConfig.sectionImages.cta || undefined}
+          alt=""
+          depth={0.14}
+          className="absolute inset-0"
+        />
+      )}
+      {/* Este gradiente é o que costura o bloco às duas pontas: começa e
+          termina exatamente no preto do corpo (#04060e), então o líquido
+          nasce do fundo da página e volta para ele antes do rodapé. Sem isto
+          a massa encostaria na borda e viraria um corte seco.
+          O `overflow-hidden` da seção garante que nada escape para o rodapé. */}
       <span
         aria-hidden="true"
-        className="absolute inset-0 bg-[linear-gradient(180deg,#04060e,rgba(8,18,39,0.55)_45%,#04060e)]"
+        className="absolute inset-0 bg-[linear-gradient(180deg,#04060e_0%,rgba(4,6,14,0.72)_18%,rgba(8,18,39,0.5)_45%,rgba(4,6,14,0.75)_80%,#04060e_100%)]"
       />
       <span aria-hidden="true" className="vignette absolute inset-0" />
 
