@@ -46,7 +46,14 @@ export default function ParallaxImage({
 
   return (
     <div ref={ref} className={`relative overflow-hidden bg-navy ${className}`}>
-      <motion.div style={{ y }} className="absolute inset-[-12%]">
+      {/* A sobra precisa ser MAIOR que o deslocamento do parallax, senão a
+          borda da imagem entra no quadro. Só que o deslocamento é de 10 a 14
+          pixels, e 12% davam 30px no celular e 51px no desktop — quatro vezes
+          o necessário, comendo 9,7% de cada borda de toda imagem do site.
+          Era isso que obrigava a reenquadrar cada foto à mão. Com 7% sobram
+          17px no celular e 30px no desktop: folga real, e o visível sobe de
+          80,6% para 87,7%. */}
+      <motion.div style={{ y }} className="absolute inset-[-7%]">
         {source && (
           // eslint-disable-next-line @next/next/no-img-element
           <img

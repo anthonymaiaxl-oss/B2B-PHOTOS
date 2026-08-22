@@ -39,18 +39,13 @@ import type { AlbumWithPhotos, Photo } from "@/types";
  * o que mantém a tela inteira no quadro; no desktop cabe tudo e volta ao
  * centro, preservando o homem e a caneca na composição.
  *
- * NETWORKING: a frase "CONEXÕES QUE GERAM VALOR" está na parede à direita e
- * ficava cortada no meio da palavra VALOR. 61% resolve sem perder o aperto de
- * mão, que continua no centro do quadro.
+ * NETWORKING voltou ao centro: a foto nova é 16:9 exata e, com a sobra do
+ * parallax reduzida de 12% para 7%, o letreiro "MASTER CLASS · REFORMA
+ * TRIBUTÁRIA" cabe inteiro nos dois formatos sem deslocar nada.
  *
  * Vazio = corte centrado, que é o certo para os fundos gráficos abstratos.
  */
-const STORY_FOCUS = [
-  "object-[78%_50%] md:object-center",
-  "object-[61%_50%] md:object-center",
-  "",
-  "",
-];
+const STORY_FOCUS = ["object-[78%_50%] md:object-center", "", "", ""];
 
 /**
  * ESTRATÉGIA (03) não usa imagem: usa a linha animada de `StrategyChart`.
