@@ -4,7 +4,11 @@ import { eventConfig } from "@/config/event";
 export default function PartnerRow({ compact = false }: { compact?: boolean }) {
   return (
     <div
-      className={`flex flex-wrap items-center justify-center gap-x-7 gap-y-4 ${
+      /* Grade de 2 colunas no celular em vez de `flex-wrap`: as quatro marcas
+         cabiam 3 numa linha e deixavam a quarta sozinha embaixo, o que lia
+         como erro de layout. Em 2×2 as duas linhas ficam cheias. A partir de
+         640px volta a ser uma linha só. */
+      className={`grid grid-cols-2 items-center justify-items-center gap-x-6 gap-y-5 sm:flex sm:flex-wrap sm:justify-center sm:gap-x-7 sm:gap-y-4 ${
         compact ? "" : "sm:gap-x-10"
       }`}
     >

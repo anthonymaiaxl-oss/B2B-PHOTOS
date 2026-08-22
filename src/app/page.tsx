@@ -4,7 +4,6 @@ import Footer from "@/components/Footer";
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
 import OrganizerBridge from "@/components/OrganizerBridge";
-import HighlightGallery from "@/components/HighlightGallery";
 import ScrollStory from "@/components/ScrollStory";
 import StatsSection from "@/components/StatsSection";
 import { eventConfig } from "@/config/event";
@@ -64,7 +63,6 @@ export default async function HomePage() {
         <ScrollStory albums={albums} photos={storyPhotos} />
         <StatsSection stats={stats} />
         <AlbumGrid albums={albums} />
-        <HighlightGallery photos={highlights} albums={albums} />
         <CTASection photo={ctaPhoto} albums={albums} />
       </main>
       <Footer />
