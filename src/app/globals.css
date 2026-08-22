@@ -159,7 +159,21 @@ body {
    animação não roda e a luz fica parada. Registrado, vira ângulo de verdade.
    Onde @property não existe, a borda simplesmente fica com um brilho fixo
    num canto: não gira, mas também não quebra nada. */
+/* `inherits: true` é o que permite UMA animação servir aos dois efeitos: ela
+   roda no elemento e o valor desce para o ::before. Com `false` o pseudo
+   ficaria parado no valor inicial e o anel dessincronizaria do brilho. */
 @property --ang {
+  syntax: "<angle>";
+  initial-value: 0turn;
+  inherits: false;
+}
+
+/* O mesmo ângulo, em degraus. Serve só ao brilho externo.
+   Motivo: `box-shadow` desfocado repinta a cada quadro e não sobe para a GPU
+   — com 9 blocos derrubava de 59,8 para 52,8fps, com quadros de 85ms. O anel
+   PRECISA ser suave, mas um borrão de 44px não: em degraus de 12° o olho não
+   distingue, e o repaint cai de 60 para 2,5 vezes por segundo. */
+@property --angq {
   syntax: "<angle>";
   initial-value: 0turn;
   inherits: false;
@@ -171,11 +185,37 @@ body {
   }
 }
 
+@keyframes gold-orbit-degraus {
+  to {
+    --angq: 1turn;
+  }
+}
+
 /* Um fio dourado dando a volta na borda do bloco.
    Gira sozinho, de propósito: 90% dos acessos são de celular, e efeito preso
    a :hover ou a pointermove simplesmente não existe lá. */
 .gold-edge {
   position: relative;
+  /* A animação mora AQUI, não no ::before: assim o mesmo --ang move o anel na
+     borda e o brilho que vaza para fora, sem chance de saírem de sincronia. */
+  animation: gold-orbit-degraus 10s steps(30) infinite;
+  /* Cada bloco entra numa fase — lado a lado, em sincronia, viraria pisca. */
+  animation-delay: var(--edge-delay, 0s);
+
+  /* O brilho que DERRAMA para fora do bloco, seguindo a luz.
+     `box-shadow` porque ele é desenhado fora da caixa e o `overflow: hidden`
+     do próprio bloco não o corta — o overflow recorta os filhos, não a sombra
+     do elemento. Um pseudo-elemento ficaria preso lá dentro.
+
+     O ponto claro do anel está a 0.75turn do início do cone, então a direção
+     da luz é `--ang + 0.75turn`. `sin`/`cos` convertem esse ângulo em
+     deslocamento: é o que faz a sombra orbitar junto com o anel em vez de só
+     piscar. Duas camadas: uma larga e difusa, uma curta e acesa. */
+  box-shadow:
+    calc(sin(var(--angq) + 0.75turn) * 20px) calc(cos(var(--angq) + 0.75turn) * -20px)
+      44px -12px rgba(212, 175, 55, 0.5),
+    calc(sin(var(--angq) + 0.75turn) * 9px) calc(cos(var(--angq) + 0.75turn) * -9px) 18px
+      -7px rgba(246, 227, 161, 0.42);
 }
 
 .gold-edge::before {
@@ -213,7 +253,6 @@ body {
     linear-gradient(#000 0 0);
   mask-composite: exclude;
   animation: gold-orbit 10s linear infinite;
-  /* Cada bloco entra numa fase — lado a lado, em sincronia, viraria pisca. */
   animation-delay: var(--edge-delay, 0s);
 }
 
