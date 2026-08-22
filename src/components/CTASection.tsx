@@ -31,10 +31,6 @@ export default function CTASection({
         className="absolute inset-0 bg-[linear-gradient(180deg,#04060e,rgba(8,18,39,0.55)_45%,#04060e)]"
       />
       <span aria-hidden="true" className="vignette absolute inset-0" />
-      <span
-        aria-hidden="true"
-        className="animate-glow absolute bottom-[-20%] left-1/2 -ml-[420px] h-[min(120vw,840px)] w-[min(120vw,840px)] rounded-full bg-[radial-gradient(circle,rgba(212,175,55,0.22),transparent_65%)] blur-[40px]"
-      />
 
       <Reveal className="relative mx-auto flex w-full max-w-[1180px] flex-col items-start gap-7">
         <h2 className="m-0 max-w-[980px] text-[clamp(32px,9vw,96px)] font-extrabold leading-[0.94] tracking-[-0.04em] text-white">

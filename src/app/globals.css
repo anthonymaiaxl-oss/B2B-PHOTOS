@@ -203,6 +203,45 @@ body {
   animation: b2bArco 6.5s linear infinite;
 }
 
+/* Neon dourado para um nome só: a assinatura no rodapé.
+   Deliberadamente NÃO usa `.text-gold-gradient`. Lá o glifo é pintado pelo
+   fundo e o resultado é metal — superfície opaca que reflete. Aqui o efeito
+   é o oposto: a letra é a fonte de luz, e o que brilha são os halos em volta
+   dela. Quatro camadas de sombra, do miolo quase branco ao halo largo e
+   apagado, é o que separa "neon" de "texto com sombra". */
+@keyframes neon-respira {
+  0%,
+  100% {
+    opacity: 0.82;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.neon-gold {
+  /* Nenhum halo quase-branco. A primeira versão começava em #fffae0 e o
+     conjunto lia como neon BRANCO: no escuro o olho julga a cor pelo halo,
+     não pelo miolo da letra. Todas as camadas são douradas saturadas, e só a
+     letra em si puxa para o creme. */
+  color: #ffeeb8;
+  text-shadow:
+    0 0 3px rgba(255, 224, 130, 0.95),
+    0 0 9px rgba(240, 195, 60, 0.85),
+    0 0 20px rgba(212, 165, 35, 0.7),
+    0 0 42px rgba(186, 138, 20, 0.5);
+  animation: neon-respira 3.6s ease-in-out infinite;
+}
+
+.neon-gold:hover {
+  color: #fff8dc;
+  text-shadow:
+    0 0 4px rgba(255, 232, 155, 1),
+    0 0 12px rgba(246, 205, 80, 0.95),
+    0 0 26px rgba(214, 170, 40, 0.85),
+    0 0 56px rgba(196, 146, 24, 0.65);
+}
+
 /* Filete horizontal que acende no centro. */
 .gold-rule {
   height: 1px;

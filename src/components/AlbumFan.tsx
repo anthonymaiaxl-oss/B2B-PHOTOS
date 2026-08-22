@@ -112,6 +112,12 @@ function Card({
           data-cursor="VER"
           aria-label={`Abrir o álbum ${album.name} com ${album.photos.length} fotos`}
           tabIndex={ativo ? 0 : -1}
+          // No desktop o navegador trata `<a>` como arrastável e inicia o
+          // arraste nativo de link — some o cursor, aparece a miniatura
+          // fantasma e o meu gesto nunca acontece. No celular não existe, por
+          // isso só aparecia no PC.
+          draggable={false}
+          onDragStart={(e) => e.preventDefault()}
           onClick={(e) => {
             // Card lateral não navega: primeiro vem para o centro. Arrasto
             // também não navega — quem decide é `onSelecionar`.
@@ -279,6 +285,7 @@ export default function AlbumFan({ albums }: { albums: AlbumWithPhotos[] }) {
           // arrasto horizontal engole o scroll e prende a pessoa na seção.
           touchAction: "pan-y",
         }}
+        onDragStart={(e) => e.preventDefault()}
         className="relative w-full cursor-grab select-none active:cursor-grabbing"
       >
         {albums.map((album, i) => (

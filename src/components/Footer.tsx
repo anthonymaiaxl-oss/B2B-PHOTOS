@@ -38,19 +38,22 @@ export default function Footer() {
 
           {/* Assinatura discreta: uma linha, sem caixa, sem cor de anúncio.
               Só o nome muda de cor no hover. */}
-          <span className="flex items-center gap-1.5">
+          {/* O nome sai maior que o resto da linha de propósito: a 9px o neon
+              vira borrão, os halos se sobrepõem às próprias letras. */}
+          <span className="flex items-center gap-2">
             {prefix}{" "}
             {url ? (
               <a
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="border-b border-gold/25 pb-px text-[#7d8aa8] transition-colors duration-300 hover:border-gold hover:text-gold"
+                aria-label={`${name} no Instagram`}
+                className="neon-gold text-[12px] font-bold tracking-[0.18em] transition-[color,text-shadow] duration-300"
               >
                 {name}
               </a>
             ) : (
-              <span className="text-[#7d8aa8]">{name}</span>
+              <span className="neon-gold text-[12px] font-bold tracking-[0.18em]">{name}</span>
             )}
           </span>
         </div>

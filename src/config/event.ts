@@ -130,10 +130,7 @@ export const eventConfig: EventConfig = {
   credit: {
     prefix: "Uma experiência digital desenvolvida pela",
     name: "Simbionte",
-    // TODO: coloque aqui o link da Simbionte (site ou Instagram).
-    // Enquanto estiver vazio, o nome aparece em destaque mas sem link —
-    // nunca aponta para um endereço inventado.
-    url: "",
+    url: "https://www.instagram.com/simbionte.ai_/",
   },
 };
 
