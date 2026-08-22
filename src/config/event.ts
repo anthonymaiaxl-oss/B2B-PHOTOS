@@ -46,7 +46,10 @@ export const eventConfig: EventConfig = {
     {
       num: "02",
       word: "NETWORKING",
-      text: "Contador, empresário e consultor na mesma sala. Boa parte do valor do dia aconteceu no intervalo do café.",
+      // "Boa parte do valor do dia aconteceu no intervalo do café" saiu: dava a
+      // entender que o conteúdo valia menos que a pausa. O encontro é o ponto
+      // do capítulo, sem precisar diminuir o resto do evento.
+      text: "Contador, empresário e consultor na mesma sala. O tipo de encontro que não se marca por e-mail.",
     },
     {
       num: "03",
