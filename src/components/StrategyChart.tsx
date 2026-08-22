@@ -24,7 +24,7 @@ import { useRef } from "react";
  */
 
 /** Duração do ciclo inteiro, em segundos. Tudo abaixo é porcentagem dela. */
-const CICLO = 16;
+const CICLO = 11;
 
 /** Quando a linha começa e termina de ser desenhada, em % do ciclo. */
 const TRACO_INICIO = 3;
@@ -38,6 +38,10 @@ type Tracado = {
   altura: number;
   prefixo: string;
   pontos: [number, number][];
+  /** Gráfico de barras do canto superior esquerdo. */
+  barras: { x: number; base: number; largura: number; passo: number; alturas: number[] };
+  /** Rosca do canto superior direito. */
+  rosca: { cx: number; cy: number; r: number; grossura: number };
 };
 
 /**
@@ -55,11 +59,13 @@ const DESKTOP: Tracado = {
   altura: 900,
   prefixo: "d",
   pontos: [
-    [170, 730],
-    [560, 600],
-    [960, 585],
-    [1400, 210],
+    [150, 790],
+    [560, 690],
+    [960, 678],
+    [1430, 470],
   ],
+  barras: { x: 150, base: 330, largura: 40, passo: 66, alturas: [86, 132, 104, 176, 148, 210, 262] },
+  rosca: { cx: 1330, cy: 215, r: 108, grossura: 34 },
 };
 
 const CELULAR: Tracado = {
@@ -67,11 +73,13 @@ const CELULAR: Tracado = {
   altura: 900,
   prefixo: "m",
   pontos: [
-    [150, 785],
-    [430, 645],
-    [740, 630],
-    [1050, 195],
+    [130, 800],
+    [420, 700],
+    [720, 688],
+    [1070, 500],
   ],
+  barras: { x: 130, base: 320, largura: 38, passo: 62, alturas: [80, 128, 100, 172, 214] },
+  rosca: { cx: 980, cy: 205, r: 96, grossura: 30 },
 };
 
 const paraD = (t: Tracado) =>
@@ -219,6 +227,9 @@ function Grafico({ t }: { t: Tracado }) {
   const idHalo = `b2bHaloGrad-${p}`;
   const idAura = `b2bAuraGrad-${p}`;
   const idLinha = `b2bLinhaGrad-${p}`;
+  const idBarra = `b2bBarraGrad-${p}`;
+  // Circunferência real do anel, usada nos comprimentos de traço.
+  const circ = 2 * Math.PI * t.rosca.r;
 
   return (
     <svg
@@ -236,6 +247,11 @@ function Grafico({ t }: { t: Tracado }) {
           <stop offset="45%" stopColor="#d4af37" />
           <stop offset="100%" stopColor="#f6e3a1" />
         </linearGradient>
+        {/* Barra acesa em cima, apagando para baixo — dá volume sem sombra. */}
+        <linearGradient id={idBarra} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#f6e3a1" stopOpacity="0.95" />
+          <stop offset="100%" stopColor="#8a6a1c" stopOpacity="0.5" />
+        </linearGradient>
         <radialGradient id={idHalo}>
           <stop offset="0%" stopColor="#f6e3a1" stopOpacity="0.85" />
           <stop offset="55%" stopColor="#d4af37" stopOpacity="0.28" />
@@ -249,6 +265,87 @@ function Grafico({ t }: { t: Tracado }) {
 
       {/* Sombra da linha: um traço largo e apagado por baixo do traço real.
           É o que faz o ouro parecer aceso em vez de desenhado. */}
+      {/* ------------------------------------------- barras (canto superior) */}
+      {t.barras.alturas.map((h, i) => (
+        <rect
+          key={`b${i}`}
+          className="b2bBarra"
+          x={t.barras.x + i * t.barras.passo}
+          y={t.barras.base - h}
+          width={t.barras.largura}
+          height={h}
+          rx={3}
+          fill={`url(#${idBarra})`}
+          style={{ animationDelay: `${(i * 0.24).toFixed(2)}s` }}
+        />
+      ))}
+      <line
+        x1={t.barras.x - 14}
+        y1={t.barras.base + 8}
+        x2={t.barras.x + t.barras.alturas.length * t.barras.passo - 12}
+        y2={t.barras.base + 8}
+        stroke="#d4af37"
+        strokeOpacity="0.3"
+        strokeWidth="2"
+      />
+
+      {/* ---------------------------------------------- rosca (canto direito) */}
+      <g className="b2bGira">
+        <circle
+          cx={t.rosca.cx}
+          cy={t.rosca.cy}
+          r={t.rosca.r}
+          fill="none"
+          stroke="#d4af37"
+          strokeOpacity="0.16"
+          strokeWidth={t.rosca.grossura}
+        />
+        {/* Os dois segmentos, em unidades reais de comprimento. Nada de
+            `pathLength` aqui: o Chrome só o respeita em `<path>`, e num
+            `<circle>` ele é silenciosamente ignorado — o traço saía cheio. */}
+        {/* A rotação vai no <g> e não no <circle>: a regra
+            `.b2bGrafico circle { transform-box: fill-box }` — necessária para
+            os pontos escalarem em torno de si — muda o referencial do
+            `transform`, e um `rotate(-90 cx cy)` no próprio círculo passava a
+            girar em torno de um ponto fora do desenho. Em <g> isso não pega. */}
+        <g transform={`rotate(-90 ${t.rosca.cx} ${t.rosca.cy})`}>
+          <circle
+            cx={t.rosca.cx}
+            cy={t.rosca.cy}
+            r={t.rosca.r}
+            fill="none"
+            stroke="#d4af37"
+            strokeWidth={t.rosca.grossura}
+            strokeDasharray={`${(circ * 0.42).toFixed(1)} ${(circ * 0.58).toFixed(1)}`}
+          />
+        </g>
+        <g transform={`rotate(62 ${t.rosca.cx} ${t.rosca.cy})`}>
+          <circle
+            cx={t.rosca.cx}
+            cy={t.rosca.cy}
+            r={t.rosca.r}
+            fill="none"
+            stroke="#f6e3a1"
+            strokeWidth={t.rosca.grossura}
+            strokeDasharray={`${(circ * 0.19).toFixed(1)} ${(circ * 0.81).toFixed(1)}`}
+          />
+        </g>
+        {/* O reflexo que corre pelo anel. */}
+        <circle
+          className="b2bArco"
+          style={{ "--circ": `${circ.toFixed(1)}px` } as React.CSSProperties}
+          cx={t.rosca.cx}
+          cy={t.rosca.cy}
+          r={t.rosca.r}
+          fill="none"
+          stroke="#fffdf2"
+          strokeOpacity="0.8"
+          strokeWidth={t.rosca.grossura * 0.3}
+          strokeLinecap="round"
+        />
+      </g>
+
+      {/* -------------------------------------------- a linha estratégica */}
       <path
         className="b2bTraco"
         d={d}
@@ -342,7 +439,7 @@ export default function StrategyChart({ className = "" }: { className?: string }
     <div
       ref={ref}
       className={`relative overflow-hidden bg-navy ${className}`}
-      style={{ background: "linear-gradient(165deg, #0a1730 0%, #081227 45%, #04060e 100%)" }}
+      style={{ background: "radial-gradient(130% 110% at 22% 0%, #1b3260 0%, #12244a 38%, #0b1832 72%, #071022 100%)" }}
     >
       <style>{CSS}</style>
 

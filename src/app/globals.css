@@ -139,6 +139,59 @@ body {
   animation-delay: 2.4s;
 }
 
+/* ------------------------------- painel de indicadores da ESTRATÉGIA */
+
+/* Barras subindo e descendo, cada uma no seu tempo. `transform-origin` na
+   base porque barra cresce do chão, não do centro. */
+@keyframes b2bBarra {
+  0%,
+  100% {
+    transform: scaleY(0.42);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* A rosca gira devagar o tempo todo — é o que mantém o painel vivo mesmo
+   entre duas passagens da linha. */
+@keyframes b2bGira {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* O arco aceso da rosca corre pela circunferência.
+   Em unidades reais, não normalizadas: o Chrome ignora `pathLength` em
+   `<circle>` (só respeita em `<path>`), então `dasharray: 0.16` virava traço
+   de 0,16 pixel e o anel aparecia cheio. O componente mede 2πr e passa em
+   `--circ`. */
+@keyframes b2bArco {
+  from {
+    stroke-dashoffset: var(--circ);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.b2bBarra {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: b2bBarra 3.4s ease-in-out infinite;
+}
+
+.b2bGira {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: b2bGira 34s linear infinite;
+}
+
+.b2bArco {
+  stroke-dasharray: calc(var(--circ) * 0.16) calc(var(--circ) * 0.84);
+  animation: b2bArco 6.5s linear infinite;
+}
+
 /* Filete horizontal que acende no centro. */
 .gold-rule {
   height: 1px;
