@@ -59,31 +59,54 @@ body {
    transparent` às vezes volta a pintar o glifo por cima do degradê. */
 .text-gold-gradient {
   background-image:
-    /* camada de cima: a luz. O núcleo é branco puro e largo — com pouco
-       contraste a faixa some no dourado claro do topo da letra. */
+    /* 1. a luz que atravessa. Núcleo branco puro e largo — com pouco
+          contraste a faixa some no dourado claro do topo da letra. */
     linear-gradient(
       100deg,
-      transparent 30%,
-      rgba(255, 247, 214, 0.45) 40%,
-      rgba(255, 255, 253, 1) 50%,
-      rgba(255, 247, 214, 0.45) 60%,
-      transparent 70%
+      transparent 33%,
+      rgba(255, 243, 200, 0.3) 42%,
+      rgba(255, 250, 228, 0.72) 50%,
+      rgba(255, 243, 200, 0.3) 58%,
+      transparent 67%
     ),
-    /* camada de baixo: o ouro do selo */
+    /* 2. os riscos do metal escovado. Passo de 4px e amplitude baixa: o
+          suficiente para a superfície deixar de ser lisa, pouco o bastante
+          para não virar listra em título de 88px nem serrilhar no celular. */
+    repeating-linear-gradient(
+      97deg,
+      rgba(255, 255, 255, 0) 0px,
+      rgba(255, 252, 235, 0.14) 1px,
+      rgba(255, 255, 255, 0) 2px,
+      rgba(60, 40, 0, 0.12) 3px,
+      rgba(255, 255, 255, 0) 4px
+    ),
+    /* 3. o ouro. Não é uma rampa de claro para escuro — é assim que fica
+          fraco. Metal polido tem DUAS faixas claras separadas por uma
+          escura: a linha do horizonte refletida na superfície. É essa
+          quebra no meio que faz o olho ler "ouro" em vez de "amarelo". */
     linear-gradient(
-      180deg,
-      #fdf3cf 0%,
-      var(--color-gold-bright) 24%,
-      var(--color-gold) 56%,
-      var(--color-gold-deep) 100%
+      177deg,
+      #fffbea 0%,
+      var(--color-gold-bright) 9%,
+      #e8c65e 20%,
+      var(--color-gold) 31%,
+      #7d5c16 45%,
+      #a37a20 51%,
+      #e4c86a 60%,
+      #fff4cd 68%,
+      var(--color-gold) 80%,
+      var(--color-gold-deep) 92%,
+      #5f4310 100%
     );
   background-size:
     200% 100%,
+    auto,
     100% 100%;
   background-position:
     130% 0,
+    0 0,
     0 0;
-  background-repeat: no-repeat;
+  background-repeat: no-repeat, repeat, no-repeat;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -217,6 +240,7 @@ body {
   8% {
     background-position:
       130% 0,
+      0 0,
       0 0;
     filter: drop-shadow(0 0 20px rgba(212, 175, 55, 0.18));
   }
@@ -229,6 +253,7 @@ body {
   100% {
     background-position:
       -30% 0,
+      0 0,
       0 0;
     filter: drop-shadow(0 0 20px rgba(212, 175, 55, 0.18));
   }
@@ -240,6 +265,7 @@ body {
   8% {
     background-position:
       130% 0,
+      0 0,
       0 0;
     filter: drop-shadow(0 0 14px rgba(212, 175, 55, 0.16));
   }
@@ -250,6 +276,7 @@ body {
   100% {
     background-position:
       -30% 0,
+      0 0,
       0 0;
     filter: drop-shadow(0 0 14px rgba(212, 175, 55, 0.16));
   }
@@ -261,11 +288,13 @@ body {
   from {
     background-position:
       130% 0,
+      0 0,
       0 0;
   }
   to {
     background-position:
       -30% 0,
+      0 0,
       0 0;
   }
 }
