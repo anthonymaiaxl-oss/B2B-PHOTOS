@@ -14,7 +14,11 @@ export default function StatsSection({ stats }: { stats: Stat[] }) {
 
       {/* `gold-stagger`: os números ficam lado a lado, então a faixa de luz
           passa em um de cada vez. Todos juntos viraria pisca-pisca. */}
-      <div className="gold-stagger mx-auto grid max-w-[1180px] grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-10 gap-y-12">
+      {/* `grid-cols-3` fixo em vez de `auto-fit,minmax(150px,1fr)`: com 150px
+          de mínimo cabiam só 2 colunas num celular de 390px e o terceiro
+          número caía para uma segunda linha sozinho. São sempre três, então a
+          contagem é fixa e o que se adapta é o tamanho. */}
+      <div className="gold-stagger mx-auto grid max-w-[1180px] grid-cols-3 gap-x-4 sm:gap-x-10">
         {stats.map((stat, index) => (
           <div
             key={stat.label}
@@ -24,7 +28,7 @@ export default function StatsSection({ stats }: { stats: Stat[] }) {
           >
             <AnimatedCounter value={stat.value} prefix={stat.prefix} />
             <span aria-hidden="true" className="h-px w-8 bg-gold/45" />
-            <span className="font-[family-name:var(--font-mono)] text-[10px] tracking-[0.22em] text-muted">
+            <span className="font-[family-name:var(--font-mono)] text-[9px] leading-[1.4] tracking-[0.1em] text-muted sm:text-[10px] sm:tracking-[0.22em]">
               {stat.label}
             </span>
           </div>

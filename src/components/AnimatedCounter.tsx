@@ -37,7 +37,7 @@ export default function AnimatedCounter({
   return (
     <span
       ref={ref}
-      className="text-gold-gradient text-[clamp(44px,10vw,78px)] font-extrabold leading-none tracking-[-0.04em]"
+      className="text-gold-gradient text-[clamp(30px,7.5vw,78px)] font-extrabold leading-none tracking-[-0.04em]"
     >
       {prefix}
       {display}
