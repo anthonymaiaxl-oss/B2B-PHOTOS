@@ -86,6 +86,13 @@ export interface EventConfig {
   };
   /** Palavras da abertura, em ordem. A última sai em ouro. */
   intro: string[];
+  /** Quem organizou. `url` vazio = nome sem link. */
+  organizer: {
+    prefix: string;
+    name: string;
+    role: string;
+    url: string;
+  };
   /** Assinatura discreta do rodapé. `url` vazio = texto sem link. */
   credit: {
     prefix: string;

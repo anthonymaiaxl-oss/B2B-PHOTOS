@@ -136,6 +136,14 @@ export const eventConfig: EventConfig = {
    */
   intro: ["REFORMA TRIBUTÁRIA", "CONHECIMENTO", "NETWORKING", "ESTRATÉGIA", "MASTER CLASS"],
 
+  /** Quem organizou o evento. Aparece na faixa entre o topo e os capítulos. */
+  organizer: {
+    prefix: "Organizado por",
+    name: "Dra. Corlleón",
+    role: "Inteligência contábil e tributária",
+    url: "https://www.instagram.com/corlleon_dra",
+  },
+
   credit: {
     prefix: "Uma experiência digital desenvolvida pela",
     name: "Simbionte",

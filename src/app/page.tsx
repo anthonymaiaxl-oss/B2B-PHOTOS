@@ -3,6 +3,7 @@ import CTASection from "@/components/CTASection";
 import Footer from "@/components/Footer";
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
+import OrganizerBridge from "@/components/OrganizerBridge";
 import HighlightGallery from "@/components/HighlightGallery";
 import ScrollStory from "@/components/ScrollStory";
 import StatsSection from "@/components/StatsSection";
@@ -59,6 +60,7 @@ export default async function HomePage() {
       <Header />
       <main className="relative z-[2]">
         <Hero />
+        <OrganizerBridge />
         <ScrollStory albums={albums} photos={storyPhotos} />
         <StatsSection stats={stats} />
         <AlbumGrid albums={albums} />

@@ -6,6 +6,7 @@ import { eventConfig } from "@/config/event";
 import { EASE } from "@/lib/motion";
 import EventSeal from "./EventSeal";
 import HeroBackdrop from "./HeroBackdrop";
+import HeroFlow from "./HeroFlow";
 
 export default function Hero() {
   const reduced = useReducedMotion();
@@ -49,8 +50,13 @@ export default function Hero() {
     <section className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden px-[22px] pb-12 pt-24 sm:pt-28">
       {/* --------------------------------------------------------- fundo do topo */}
       <div className="absolute inset-0 bg-navy">
-        {/* Padrão da casa: desenho em movimento, nunca foto do evento. */}
-        <HeroBackdrop className="absolute inset-0 h-full w-full" />
+        {/* Padrão da casa: desenho em movimento, nunca foto do evento.
+            Duas camadas: a massa líquida embaixo dá a atmosfera, a malha de
+            nós por cima carrega o conceito da marca — B2B CONEXÕES. A malha
+            fica mais apagada aqui do que sozinha, senão os pontos dourados
+            competem com os veios de ouro do líquido. */}
+        <HeroFlow className="absolute inset-0 h-full w-full" />
+        <HeroBackdrop className="absolute inset-0 h-full w-full opacity-60" />
 
         {heroImage && (
           <motion.div

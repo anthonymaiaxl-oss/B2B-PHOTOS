@@ -48,12 +48,12 @@ export default function Footer() {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label={`${name} no Instagram`}
-                className="neon-gold text-[12px] font-bold tracking-[0.18em] transition-[color,text-shadow] duration-300"
+                className="neon-suave text-[10.5px] font-bold tracking-[0.14em] transition-[color,text-shadow] duration-300"
               >
                 {name}
               </a>
             ) : (
-              <span className="neon-gold text-[12px] font-bold tracking-[0.18em]">{name}</span>
+              <span className="neon-suave text-[10.5px] font-bold tracking-[0.14em]">{name}</span>
             )}
           </span>
         </div>
