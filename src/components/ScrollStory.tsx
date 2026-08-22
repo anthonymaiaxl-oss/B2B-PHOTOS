@@ -3,6 +3,7 @@
 import { eventConfig } from "@/config/event";
 import ParallaxImage from "./ParallaxImage";
 import Reveal from "./Reveal";
+import StrategyChart from "./StrategyChart";
 import type { AlbumWithPhotos, Photo } from "@/types";
 
 /**
@@ -26,6 +27,41 @@ import type { AlbumWithPhotos, Photo } from "@/types";
  *
  * As fotos continuam vindo do Drive — nenhuma imagem fixa no código.
  */
+/**
+ * Ponto de corte de cada capítulo, na mesma ordem de `sectionImages.story`
+ * (01 CONHECIMENTO, 02 NETWORKING, 03 ESTRATÉGIA, 04 MOMENTOS).
+ *
+ * O quadro é 4/3 no celular e 16/9 no desktop, e o parallax ainda mostra só a
+ * parte central. Uma imagem cujo assunto não está no meio precisa dizer para
+ * onde puxar o corte, senão o assunto some justamente na tela pequena.
+ *
+ * CONHECIMENTO: o notebook está à direita na foto. No celular puxa para 78%,
+ * o que mantém a tela inteira no quadro; no desktop cabe tudo e volta ao
+ * centro, preservando o homem e a caneca na composição.
+ *
+ * NETWORKING: a frase "CONEXÕES QUE GERAM VALOR" está na parede à direita e
+ * ficava cortada no meio da palavra VALOR. 61% resolve sem perder o aperto de
+ * mão, que continua no centro do quadro.
+ *
+ * Vazio = corte centrado, que é o certo para os fundos gráficos abstratos.
+ */
+const STORY_FOCUS = [
+  "object-[78%_50%] md:object-center",
+  "object-[61%_50%] md:object-center",
+  "",
+  "",
+];
+
+/**
+ * ESTRATÉGIA (03) não usa imagem: usa a linha animada de `StrategyChart`.
+ *
+ * Enquanto isto apontar para 2, o valor de `sectionImages.story[2]` em
+ * event.ts é ignorado. Para voltar à imagem, troque por -1 — o arquivo
+ * `public/secoes/estrategia.jpg` continua no repositório justamente para
+ * isso.
+ */
+const CAPITULO_COM_GRAFICO = 2;
+
 export default function ScrollStory({
   albums,
   photos,
@@ -41,6 +77,11 @@ export default function ScrollStory({
           const album = albums.length ? albums[index % albums.length] : null;
           const photo = photos?.[index] ?? album?.photos[1] ?? album?.cover ?? null;
           const flipped = index % 2 === 1;
+          // O quadro é o mesmo para imagem e para gráfico: trocar o conteúdo
+          // não pode mudar o desenho da página.
+          const quadro = `aspect-[4/3] w-full rounded-[4px] border border-gold/12 md:col-span-8 md:aspect-[16/9] ${
+            flipped ? "md:order-1" : "md:order-2"
+          }`;
 
           return (
             <Reveal key={chapter.num} className="flex flex-col gap-7">
@@ -64,16 +105,19 @@ export default function ScrollStory({
                   {chapter.text}
                 </p>
 
-                <ParallaxImage
-                  photo={photo}
-                  src={eventConfig.sectionImages.story[index] || undefined}
-                  sizes="(min-width: 768px) 66vw, 100vw"
-                  alt={`${chapter.word} — ${eventConfig.name}`}
-                  depth={0.1 + index * 0.02}
-                  className={`aspect-[4/3] w-full rounded-[4px] border border-gold/12 md:col-span-8 md:aspect-[16/9] ${
-                    flipped ? "md:order-1" : "md:order-2"
-                  }`}
-                />
+                {index === CAPITULO_COM_GRAFICO ? (
+                  <StrategyChart className={quadro} />
+                ) : (
+                  <ParallaxImage
+                    photo={photo}
+                    src={eventConfig.sectionImages.story[index] || undefined}
+                    imgClassName={STORY_FOCUS[index] ?? ""}
+                    sizes="(min-width: 768px) 66vw, 100vw"
+                    alt={`${chapter.word} — ${eventConfig.name}`}
+                    depth={0.1 + index * 0.02}
+                    className={quadro}
+                  />
+                )}
               </div>
             </Reveal>
           );
