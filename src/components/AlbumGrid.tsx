@@ -22,8 +22,8 @@ export default function AlbumGrid({ albums }: { albums: AlbumWithPhotos[] }) {
           </p>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-3.5 sm:gap-4">
-            {albums.map((album) => (
-              <AlbumCard key={album.id} album={album} />
+            {albums.map((album, index) => (
+              <AlbumCard key={album.id} album={album} index={index} />
             ))}
           </div>
         )}

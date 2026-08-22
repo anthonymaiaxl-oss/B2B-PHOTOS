@@ -79,7 +79,7 @@ export default function ScrollStory({
           const flipped = index % 2 === 1;
           // O quadro é o mesmo para imagem e para gráfico: trocar o conteúdo
           // não pode mudar o desenho da página.
-          const quadro = `aspect-[4/3] w-full rounded-[4px] border border-gold/12 md:col-span-8 md:aspect-[16/9] ${
+          const quadro = `gold-edge aspect-[4/3] w-full rounded-[4px] border border-gold/12 md:col-span-8 md:aspect-[16/9] ${
             flipped ? "md:order-1" : "md:order-2"
           }`;
 

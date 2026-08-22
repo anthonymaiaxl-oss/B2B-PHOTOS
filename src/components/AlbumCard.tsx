@@ -2,10 +2,19 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
+import type { CSSProperties } from "react";
 import { revealVariants, viewportOnce } from "@/lib/motion";
 import type { AlbumWithPhotos } from "@/types";
 
-export default function AlbumCard({ album }: { album: AlbumWithPhotos }) {
+export default function AlbumCard({
+  album,
+  index = 0,
+}: {
+  album: AlbumWithPhotos;
+  /** Posição na grade. Serve só para defasar o fio de luz da borda: os cards
+   *  ficam lado a lado e, em sincronia, o efeito viraria pisca-pisca. */
+  index?: number;
+}) {
   return (
     <motion.div
       variants={revealVariants}
@@ -17,7 +26,8 @@ export default function AlbumCard({ album }: { album: AlbumWithPhotos }) {
         href={`/album/${album.id}`}
         data-cursor="VER"
         aria-label={`Abrir o álbum ${album.name} com ${album.photos.length} fotos`}
-        className="gold-sheen group relative block aspect-[4/5] overflow-hidden rounded-[4px] border border-gold/15 bg-navy transition-colors duration-500 hover:border-gold/55"
+        style={{ "--edge-delay": `${(index * -2.5).toFixed(1)}s` } as CSSProperties}
+        className="gold-edge gold-sheen group relative block aspect-[4/5] overflow-hidden rounded-[4px] border border-gold/15 bg-navy transition-colors duration-500 hover:border-gold/55"
       >
         {album.cover && (
           // eslint-disable-next-line @next/next/no-img-element

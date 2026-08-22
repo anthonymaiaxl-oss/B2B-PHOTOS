@@ -56,7 +56,10 @@ export const eventConfig: EventConfig = {
     {
       num: "04",
       word: "MOMENTOS",
-      text: "As perguntas difíceis, os aplausos, o aperto de mão no fim da tarde. Está tudo aqui.",
+      // "Está tudo aqui" saiu: prometia que este bloco era onde se pega as
+      // fotos. Ele é capítulo editorial, não link — quem clica aqui não vai
+      // para lugar nenhum. Os álbuns ficam na seção EXPLORE O DIA INTEIRO.
+      text: "As perguntas difíceis, o riso no intervalo, o aperto de mão no fim da tarde. O dia também foi isso.",
     },
   ],
 

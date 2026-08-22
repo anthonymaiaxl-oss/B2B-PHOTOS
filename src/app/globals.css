@@ -69,17 +69,16 @@ body {
       rgba(255, 243, 200, 0.3) 58%,
       transparent 67%
     ),
-    /* 2. os riscos do metal escovado. Passo de 4px e amplitude baixa: o
-          suficiente para a superfície deixar de ser lisa, pouco o bastante
-          para não virar listra em título de 88px nem serrilhar no celular. */
-    repeating-linear-gradient(
-      97deg,
-      rgba(255, 255, 255, 0) 0px,
-      rgba(255, 252, 235, 0.14) 1px,
-      rgba(255, 255, 255, 0) 2px,
-      rgba(60, 40, 0, 0.12) 3px,
-      rgba(255, 255, 255, 0) 4px
-    ),
+    /* 2. o desgaste do metal — ruído, não listra.
+          A primeira tentativa usou `repeating-linear-gradient` e ficou uma
+          grade de linhas idênticas: lia como textura de PNG colada por cima,
+          não como superfície. Aqui é turbulência fractal, esticada no eixo Y
+          (baseFrequency alta em X, baixíssima em Y), o que produz estrias
+          verticais IRREGULARES — que é como o ouro escovado se comporta.
+          Duas passadas, uma clara e uma escura, porque desgaste é tanto o
+          brilho que sobra quanto a sujeira que fica. */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='c'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.62 0.022' numOctaves='4' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 0.92 0 0 0 0 0.62 0.28 0.28 0.28 0 -0.13'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23c)'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='e'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75 0.03' numOctaves='3' seed='4'/%3E%3CfeColorMatrix values='0 0 0 0 0.18 0 0 0 0 0.11 0 0 0 0 0.01 0.34 0.34 0.34 0 -0.20'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23e)'/%3E%3C/svg%3E"),
     /* 3. o ouro. Não é uma rampa de claro para escuro — é assim que fica
           fraco. Metal polido tem DUAS faixas claras separadas por uma
           escura: a linha do horizonte refletida na superfície. É essa
@@ -100,13 +99,15 @@ body {
     );
   background-size:
     200% 100%,
-    auto,
+    180px 180px,
+    180px 180px,
     100% 100%;
   background-position:
     130% 0,
     0 0,
+    0 0,
     0 0;
-  background-repeat: no-repeat, repeat, no-repeat;
+  background-repeat: no-repeat, repeat, repeat, no-repeat;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -149,6 +150,77 @@ body {
     rgba(212, 175, 55, 0.55) 70%,
     transparent
   );
+}
+
+/* ------------------------------------- fio de luz correndo pela borda */
+
+/* O ângulo precisa ser REGISTRADO. Como custom property comum o navegador
+   trata "--ang" como texto e não sabe interpolar entre dois valores — a
+   animação não roda e a luz fica parada. Registrado, vira ângulo de verdade.
+   Onde @property não existe, a borda simplesmente fica com um brilho fixo
+   num canto: não gira, mas também não quebra nada. */
+@property --ang {
+  syntax: "<angle>";
+  initial-value: 0turn;
+  inherits: false;
+}
+
+@keyframes gold-orbit {
+  to {
+    --ang: 1turn;
+  }
+}
+
+/* Um fio dourado dando a volta na borda do bloco.
+   Gira sozinho, de propósito: 90% dos acessos são de celular, e efeito preso
+   a :hover ou a pointermove simplesmente não existe lá. */
+.gold-edge {
+  position: relative;
+}
+
+.gold-edge::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 2px;
+  /* `rgba(...,0)` e não `transparent`: a palavra-chave interpola passando por
+     preto e suja o degradê com um cinza no meio do caminho. */
+  background: conic-gradient(
+    from var(--ang),
+    rgba(212, 175, 55, 0) 0turn 0.44turn,
+    rgba(212, 175, 55, 0.5) 0.58turn,
+    var(--color-gold-bright) 0.68turn,
+    #fffdf2 0.75turn,
+    var(--color-gold-bright) 0.82turn,
+    rgba(212, 175, 55, 0.5) 0.92turn,
+    rgba(212, 175, 55, 0) 0.99turn 1turn
+  );
+  /* Sem isto o fio é uma linha de 2px e passa despercebido. O halo é o que
+     faz ler como luz correndo, e não como uma borda que mudou de cor. */
+  filter: drop-shadow(0 0 5px rgba(246, 227, 161, 0.55));
+  /* Recorta o miolo e deixa só o anel: uma máscara cobre a caixa inteira,
+     outra cobre só a caixa de conteúdo, e `exclude` subtrai a segunda da
+     primeira. Sobra a moldura de 1,5px. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: gold-orbit 10s linear infinite;
+  /* Cada bloco entra numa fase — lado a lado, em sincronia, viraria pisca. */
+  animation-delay: var(--edge-delay, 0s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gold-edge::before {
+    display: none;
+  }
 }
 
 .gold-border {
@@ -241,6 +313,7 @@ body {
     background-position:
       130% 0,
       0 0,
+      0 0,
       0 0;
     filter: drop-shadow(0 0 20px rgba(212, 175, 55, 0.18));
   }
@@ -254,6 +327,7 @@ body {
     background-position:
       -30% 0,
       0 0,
+      0 0,
       0 0;
     filter: drop-shadow(0 0 20px rgba(212, 175, 55, 0.18));
   }
@@ -266,6 +340,7 @@ body {
     background-position:
       130% 0,
       0 0,
+      0 0,
       0 0;
     filter: drop-shadow(0 0 14px rgba(212, 175, 55, 0.16));
   }
@@ -276,6 +351,7 @@ body {
   100% {
     background-position:
       -30% 0,
+      0 0,
       0 0,
       0 0;
     filter: drop-shadow(0 0 14px rgba(212, 175, 55, 0.16));
@@ -289,11 +365,13 @@ body {
     background-position:
       130% 0,
       0 0,
+      0 0,
       0 0;
   }
   to {
     background-position:
       -30% 0,
+      0 0,
       0 0,
       0 0;
   }
