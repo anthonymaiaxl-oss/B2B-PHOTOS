@@ -39,7 +39,7 @@ export default function CTASection({
       <Reveal className="relative mx-auto flex w-full max-w-[1180px] flex-col items-start gap-7">
         <h2 className="m-0 max-w-[980px] text-[clamp(32px,9vw,96px)] font-extrabold leading-[0.94] tracking-[-0.04em] text-white">
           <span className="block">{eventConfig.finalCta.lineOne}</span>
-          <span className="text-gold-gradient block pb-[0.06em]">
+          <span className="text-gold-gradient block">
             {eventConfig.finalCta.lineTwo}
           </span>
         </h2>

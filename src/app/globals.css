@@ -112,6 +112,17 @@ body {
   background-clip: text;
   color: transparent;
   -webkit-text-fill-color: transparent;
+  /* Folga de pintura em cima e embaixo.
+     O texto aqui é desenhado pelo FUNDO, e fundo só cobre a caixa do
+     elemento. Com `leading` abaixo de 1 — que é o caso de todos os títulos
+     grandes daqui — os glifos ultrapassam a caixa, e o que fica de fora
+     simplesmente não recebe tinta: o til de CONEXÕES some por cima, a perna
+     do g e a cedilha somem por baixo. A folga devolve área de pintura e a
+     margem negativa cancela o efeito dela no layout, então nada se desloca.
+     Em elemento inline a margem é ignorada, mas ali ela também não faz falta:
+     padding vertical não mexe na altura da linha. */
+  padding-block: 0.14em 0.1em;
+  margin-block: -0.14em -0.1em;
   /* O halo que dá o ar de cinema. Fica atrás do glifo, não dentro dele.
      Ele acende junto com a passagem da luz — ver @keyframes gold-sweep. */
   filter: drop-shadow(0 0 20px rgba(212, 175, 55, 0.18));

@@ -92,7 +92,7 @@ export default function ScrollStory({
                 <span aria-hidden="true" className="h-px flex-1 bg-gold/25" />
               </div>
 
-              <h2 className="text-gold-gradient m-0 hyphens-auto pb-[0.06em] text-[clamp(30px,8vw,88px)] font-extrabold leading-[0.95] tracking-[-0.035em]">
+              <h2 className="text-gold-gradient m-0 hyphens-auto text-[clamp(30px,8vw,88px)] font-extrabold leading-[0.95] tracking-[-0.035em]">
                 {chapter.word}
               </h2>
 

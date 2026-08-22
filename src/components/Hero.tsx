@@ -130,9 +130,7 @@ export default function Hero() {
           <span className="text-[clamp(15px,4.6vw,30px)] font-semibold tracking-[0.34em] text-white/90">
             {eventConfig.hero.titleTop}
           </span>
-          {/* pb-[0.08em] evita que o recorte do degradê corte a base das letras
-              e dos acentos em telas de alta densidade. */}
-          <span className="text-gold-gradient block pb-[0.08em] text-[clamp(34px,10.5vw,118px)] font-extrabold leading-[0.95] tracking-[-0.02em]">
+          <span className="text-gold-gradient block text-[clamp(34px,10.5vw,118px)] font-extrabold leading-[0.95] tracking-[-0.02em]">
             {eventConfig.hero.titleMain}
           </span>
         </motion.h1>
