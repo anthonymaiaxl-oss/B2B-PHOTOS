@@ -1,25 +1,47 @@
-IMAGENS FIXAS DAS SEÇÕES
-========================
+IMAGENS DAS SEÇÕES
+==================
 
-Coloque aqui os arquivos e depois escreva o caminho em src/config/event.ts,
-no bloco `sectionImages`. O "public/" NÃO entra no caminho:
+Quem manda é o bloco `sectionImages` em src/config/event.ts. Ele aceita
+três formas, e a PRIMEIRA costuma ser a melhor.
 
-    arquivo:  public/secoes/hero.jpg
-    caminho:  "/secoes/hero.jpg"
 
-Nomes sugeridos (só sugestão — o que vale é o caminho no event.ts):
+1) NOME DE UMA FOTO DO ÁLBUM  (recomendado)
+-------------------------------------------
+    hero: "IMG_1024.jpg",
 
-    hero.jpg          fundo do topo da home
-    conhecimento.jpg  seção 01
-    networking.jpg    seção 02
-    estrategia.jpg    seção 03
-    momentos.jpg      seção 04
-    cta.jpg           fundo do bloco final
+Aponta uma foto real que já está no Google Drive. Vantagens:
+  - sai em alta resolução (até 2600px, escolhida pelo navegador);
+  - a foto continua aparecendo na galeria normalmente;
+  - não duplica arquivo nenhum no repositório;
+  - trocar a imagem do site é trocar um nome, sem novo deploy de arquivo.
+
+O nome é o mesmo que aparece na área da organização (/admin), na lista
+"No ar em <álbum>". Pode escrever com ou sem extensão; maiúscula não importa.
+
+Dica: se for usar uma foto no topo da home, envie ELA com a opção
+"Otimizar para a web" desmarcada. A otimização reduz para 2560px, o que é
+ótimo para a galeria e suficiente para o hero, mas se você quer o máximo de
+nitidez naquela imagem específica, mande o arquivo original.
+
+
+2) ARQUIVO FIXO NESTA PASTA
+---------------------------
+    hero: "/secoes/hero.jpg",
+
+Para imagem de layout que não é foto do evento. Coloque o arquivo aqui em
+public/secoes/ — o "public/" NÃO entra no caminho.
 
 Formato: JPG, 1920x1080 (16:9), qualidade 80, até ~350 KB cada.
 Não use imagens gigantes: elas ficam atrás de uma camada escura e de
 tipografia grande, então resolução extra só deixa o site lento.
 
-Deixar o campo vazio ("") em event.ts faz a seção voltar a usar uma foto real
-do álbum no Drive. Quando as fotos do evento estiverem no ar, apagar o caminho
-é o suficiente para o site passar a mostrar o registro verdadeiro.
+
+3) VAZIO
+--------
+    hero: "",
+
+O site escolhe uma foto do álbum sozinho. É o padrão.
+
+
+Se o nome apontado não existir mais (foto apagada do álbum), a seção volta
+sozinha para o automático em vez de ficar sem imagem.

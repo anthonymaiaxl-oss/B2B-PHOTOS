@@ -3,7 +3,7 @@
 import { eventConfig } from "@/config/event";
 import ParallaxImage from "./ParallaxImage";
 import Reveal from "./Reveal";
-import type { AlbumWithPhotos } from "@/types";
+import type { AlbumWithPhotos, Photo } from "@/types";
 
 /**
  * Os quatro capítulos editoriais do evento.
@@ -26,13 +26,20 @@ import type { AlbumWithPhotos } from "@/types";
  *
  * As fotos continuam vindo do Drive — nenhuma imagem fixa no código.
  */
-export default function ScrollStory({ albums }: { albums: AlbumWithPhotos[] }) {
+export default function ScrollStory({
+  albums,
+  photos,
+}: {
+  albums: AlbumWithPhotos[];
+  /** Fotos escolhidas em `sectionImages.story`, já resolvidas na home. */
+  photos?: (Photo | null)[];
+}) {
   return (
     <section className="px-[22px]">
       <div className="mx-auto flex max-w-[1180px] flex-col gap-[clamp(90px,17vh,180px)] py-[clamp(80px,15vh,160px)]">
         {eventConfig.story.map((chapter, index) => {
           const album = albums.length ? albums[index % albums.length] : null;
-          const photo = album?.photos[1] ?? album?.cover ?? null;
+          const photo = photos?.[index] ?? album?.photos[1] ?? album?.cover ?? null;
           const flipped = index % 2 === 1;
 
           return (
@@ -60,6 +67,7 @@ export default function ScrollStory({ albums }: { albums: AlbumWithPhotos[] }) {
                 <ParallaxImage
                   photo={photo}
                   src={eventConfig.sectionImages.story[index] || undefined}
+                  sizes="(min-width: 768px) 66vw, 100vw"
                   alt={`${chapter.word} — ${eventConfig.name}`}
                   depth={0.1 + index * 0.02}
                   className={`aspect-[4/3] w-full rounded-[4px] border border-gold/12 md:col-span-8 md:aspect-[16/9] ${

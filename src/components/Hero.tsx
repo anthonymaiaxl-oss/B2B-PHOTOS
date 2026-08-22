@@ -5,10 +5,9 @@ import { useEffect } from "react";
 import { eventConfig } from "@/config/event";
 import { EASE } from "@/lib/motion";
 import EventSeal from "./EventSeal";
-import PartnerRow from "./PartnerRow";
-import type { Photo } from "@/types";
+import HeroBackdrop from "./HeroBackdrop";
 
-export default function Hero({ photo }: { photo: Photo | null }) {
+export default function Hero() {
   const reduced = useReducedMotion();
   const rawX = useMotionValue(0);
   const rawY = useMotionValue(0);
@@ -39,13 +38,20 @@ export default function Hero({ photo }: { photo: Photo | null }) {
 
   const meta = [eventConfig.date, eventConfig.location].filter(Boolean).join(" · ");
 
-  // Imagem fixa de `public/` quando configurada; senão, a capa real do Drive.
-  const heroImage = eventConfig.sectionImages.hero || photo?.previewUrl;
+  // O topo aceita SOMENTE arquivo fixo de `public/` — caminho começando com
+  // "/". Nome de foto do álbum é ignorado aqui de propósito: já aconteceu de
+  // uma foto de teste subir como fundo do site. Sem arquivo configurado, o
+  // fundo é a malha animada de conexões, e nada mais.
+  const configHero = eventConfig.sectionImages.hero;
+  const heroImage = configHero.startsWith("/") ? configHero : undefined;
 
   return (
     <section className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden px-[22px] pb-12 pt-24 sm:pt-28">
-      {/* ---------------------------------------------------- fotografia de fundo */}
+      {/* --------------------------------------------------------- fundo do topo */}
       <div className="absolute inset-0 bg-navy">
+        {/* Padrão da casa: desenho em movimento, nunca foto do evento. */}
+        <HeroBackdrop className="absolute inset-0 h-full w-full" />
+
         {heroImage && (
           <motion.div
             className="h-full w-full"
@@ -188,14 +194,6 @@ export default function Hero({ photo }: { photo: Photo | null }) {
         </motion.div>
       </div>
 
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 1, ease: EASE, delay: 1.1 }}
-        className="relative z-[2] mx-auto mt-10 w-full max-w-[1180px] border-t border-gold/12 pt-7"
-      >
-        <PartnerRow />
-      </motion.div>
     </section>
   );
 }

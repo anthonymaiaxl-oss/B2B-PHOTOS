@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "../../src";
 
 @theme {
   /* Preto azulado da arte do evento */
@@ -46,18 +47,72 @@ body {
 
 /* ---------------------------------------------------------- ouro utilitário */
 
-/* Texto com o degradê do selo (claro → dourado → queimado). */
+/* Texto com o degradê do selo (claro → dourado → queimado) e uma faixa de luz
+   que atravessa o texto de tempos em tempos.
+
+   A faixa é uma segunda camada de fundo, por cima do dourado, recortada pelo
+   mesmo `background-clip: text`. Ela fica PARADA fora do texto quase o tempo
+   todo: passa uma vez a cada 12s e leva ~2,9s para atravessar. Ser raro é o
+   ponto — brilho contínuo vira enfeite de banner e cansa em duas rolagens.
+
+   `-webkit-text-fill-color` além de `color`: no Safari do iPhone só `color:
+   transparent` às vezes volta a pintar o glifo por cima do degradê. */
 .text-gold-gradient {
-  background: linear-gradient(
-    180deg,
-    #fdf3cf 0%,
-    var(--color-gold-bright) 24%,
-    var(--color-gold) 56%,
-    var(--color-gold-deep) 100%
-  );
+  background-image:
+    /* camada de cima: a luz. O núcleo é branco puro e largo — com pouco
+       contraste a faixa some no dourado claro do topo da letra. */
+    linear-gradient(
+      100deg,
+      transparent 30%,
+      rgba(255, 247, 214, 0.45) 40%,
+      rgba(255, 255, 253, 1) 50%,
+      rgba(255, 247, 214, 0.45) 60%,
+      transparent 70%
+    ),
+    /* camada de baixo: o ouro do selo */
+    linear-gradient(
+      180deg,
+      #fdf3cf 0%,
+      var(--color-gold-bright) 24%,
+      var(--color-gold) 56%,
+      var(--color-gold-deep) 100%
+    );
+  background-size:
+    200% 100%,
+    100% 100%;
+  background-position:
+    130% 0,
+    0 0;
+  background-repeat: no-repeat;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  -webkit-text-fill-color: transparent;
+  /* O halo que dá o ar de cinema. Fica atrás do glifo, não dentro dele.
+     Ele acende junto com a passagem da luz — ver @keyframes gold-sweep. */
+  filter: drop-shadow(0 0 20px rgba(212, 175, 55, 0.18));
+  animation: gold-sweep 12s ease-in-out infinite;
+}
+
+/* Os números das estatísticas brilham SEM PARAR — a luz não tem pausa neles.
+   São poucos, pequenos, e é o único lugar da página onde o número é a
+   informação em si; o brilho contínuo puxa o olho para lá.
+   Dois seletores de classe, então isto ganha do `.text-gold-gradient` de cima
+   e também da regra do celular mais abaixo. */
+.gold-stagger .text-gold-gradient {
+  animation-name: gold-sweep-loop;
+  animation-duration: 3.6s;
+  animation-timing-function: linear;
+  filter: drop-shadow(0 0 18px rgba(212, 175, 55, 0.3));
+}
+
+/* Eles ficam lado a lado: a luz passa em um de cada vez, em terços do ciclo. */
+.gold-stagger > *:nth-child(2) .text-gold-gradient {
+  animation-delay: 1.2s;
+}
+
+.gold-stagger > *:nth-child(3) .text-gold-gradient {
+  animation-delay: 2.4s;
 }
 
 /* Filete horizontal que acende no centro. */
@@ -153,6 +208,68 @@ body {
   }
 }
 
+/* A faixa de luz dos títulos. Só a 1ª camada de fundo se move; a 2ª (o ouro)
+   fica em `0 0` do começo ao fim. Entre 32% e 100% nada acontece: é a pausa.
+   Em 125% a faixa está fora do texto pela esquerda, em -25% pela direita —
+   por isso o salto do fim para o começo do ciclo não aparece. */
+@keyframes gold-sweep {
+  0%,
+  8% {
+    background-position:
+      130% 0,
+      0 0;
+    filter: drop-shadow(0 0 20px rgba(212, 175, 55, 0.18));
+  }
+  /* No meio da travessia o halo acende junto: é o que faz a luz parecer que
+     sai da letra, em vez de passar por cima dela. */
+  20% {
+    filter: drop-shadow(0 0 38px rgba(246, 227, 161, 0.5));
+  }
+  34%,
+  100% {
+    background-position:
+      -30% 0,
+      0 0;
+    filter: drop-shadow(0 0 20px rgba(212, 175, 55, 0.18));
+  }
+}
+
+/* Versão do celular: mesmo desenho, halo de raio menor. */
+@keyframes gold-sweep-mobile {
+  0%,
+  8% {
+    background-position:
+      130% 0,
+      0 0;
+    filter: drop-shadow(0 0 14px rgba(212, 175, 55, 0.16));
+  }
+  20% {
+    filter: drop-shadow(0 0 24px rgba(246, 227, 161, 0.4));
+  }
+  34%,
+  100% {
+    background-position:
+      -30% 0,
+      0 0;
+    filter: drop-shadow(0 0 14px rgba(212, 175, 55, 0.16));
+  }
+}
+
+/* Sem pausa: a luz entra de um lado e sai do outro, direto. Usada só nos
+   números das estatísticas. */
+@keyframes gold-sweep-loop {
+  from {
+    background-position:
+      130% 0,
+      0 0;
+  }
+  to {
+    background-position:
+      -30% 0,
+      0 0;
+  }
+}
+
 @keyframes shimmer {
   0% {
     background-position: -180% 0;
@@ -191,6 +308,15 @@ body {
 
   .animate-spin-slow {
     animation-duration: 90s;
+  }
+
+  /* A faixa de luz continua — ela é parte da identidade e o celular é onde o
+     site vai ser visto. O que muda é a margem: passa a cada 16s em vez de 12s
+     e o halo tem raio menor. O `drop-shadow` é recalculado a cada quadro
+     enquanto a luz atravessa, e é aí que aparelho fraco engasga. */
+  .text-gold-gradient {
+    animation-name: gold-sweep-mobile;
+    animation-duration: 16s;
   }
 }
 

@@ -9,3 +9,6 @@ build
 .vercel
 next-env.d.ts
 *.tsbuildinfo
+
+# Configuração local do Claude Code (não é do projeto)
+.claude/
