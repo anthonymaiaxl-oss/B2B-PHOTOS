@@ -45,6 +45,33 @@ body {
   outline-offset: 3px;
 }
 
+/* ------------------------------------------------------------- desempenho */
+
+/* Seção fora da tela não precisa ser desenhada.
+   A home tem perto de cem animações simultâneas — folha de contato, painel de
+   indicadores, fios de luz nas bordas, varredura nos títulos. Todas continuam
+   marcando o tempo mesmo quando o bloco está a três telas de distância, e o
+   navegador segue pintando o que está próximo do viewport. Medido rolando a
+   página inteira em viewport de celular: 45,3fps, 26 quadros acima de 33ms e
+   um pico de 117ms — travada visível.
+   `content-visibility: auto` faz o navegador PULAR layout e pintura do que
+   está fora de vista. `contain-intrinsic-size: auto` guarda o tamanho real
+   depois da primeira exibição, então a barra de rolagem não pula.
+   O topo fica de fora: está sempre visível na carga e tem as duas telas de
+   canvas, que já se congelam sozinhas.
+
+   NÃO vale para a seção dos capítulos: ela tem quatro capítulos e passa de
+   4000px de altura. Estimá-la em 620px colapsava os quatro, fazia a barra de
+   rolagem pular quando entravam e — pior — deixava o bloco de MOMENTOS num
+   subárvore não renderizada, onde o IntersectionObserver que dispara a
+   animação nunca chegava a ver nada. Ali o custo de pintar é menor que o
+   estrago de estimar errado. */
+main > section:not(:first-child):not(.sem-pular),
+footer {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 620px;
+}
+
 /* ---------------------------------------------------------- ouro utilitário */
 
 /* Texto com o degradê do selo (claro → dourado → queimado) e uma faixa de luz
@@ -265,6 +292,92 @@ body {
     0 0 20px rgba(186, 140, 26, 0.28);
 }
 
+/* --------------------------------- folha de contato revelando (MOMENTOS) */
+
+/* Um único bloco de keyframes serve aos doze quadros: todos rodam a mesma
+   animação e só entram em fases diferentes, por `animation-delay`. Delay
+   negativo é seguro aqui porque o laço é uniforme — ao contrário do painel da
+   ESTRATÉGIA, não existe um "fim" que possa sair fora de hora. */
+.b2bFolha { display: block; width: 100%; height: 100%; }
+
+/* A foto aparecendo no papel: sobe rápido, dá o pico e assenta num brilho
+   baixo, onde fica a maior parte do ciclo. */
+@keyframes b2bRevela {
+  0%,
+  4% {
+    opacity: 0.06;
+  }
+  11% {
+    opacity: 1;
+  }
+  26% {
+    opacity: 0.46;
+  }
+  52% {
+    opacity: 0.24;
+  }
+  100% {
+    opacity: 0.11;
+  }
+}
+
+/* O estouro do flash. Curto de propósito: é o instante do clique. */
+@keyframes b2bFlash {
+  0%,
+  5% {
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.55;
+  }
+  16%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Respiro do quadro inteiro — quase imperceptível, tira o ar de grade morta. */
+@keyframes b2bQuadro {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  11% {
+    transform: scale(1.014);
+  }
+  30% {
+    transform: scale(1);
+  }
+}
+
+.b2bRevela {
+  animation: b2bRevela 9s ease-in-out infinite;
+}
+
+.b2bFlash {
+  animation: b2bFlash 9s ease-out infinite;
+}
+
+.b2bQuadro {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: b2bQuadro 9s ease-in-out infinite;
+}
+
+/* Sem movimento: a folha fica revelada e parada. Sem isto os quadros parariam
+   no último keyframe, em opacidade 0.14, e o bloco viraria uma grade apagada. */
+@media (prefers-reduced-motion: reduce) {
+  .b2bFolha * {
+    animation: none !important;
+  }
+  .b2bRevela {
+    opacity: 0.38;
+  }
+  .b2bFlash {
+    opacity: 0;
+  }
+}
+
 /* Filete horizontal que acende no centro. */
 .gold-rule {
   height: 1px;
@@ -364,9 +477,9 @@ body {
     rgba(212, 175, 55, 0.5) 0.92turn,
     rgba(212, 175, 55, 0) 0.99turn 1turn
   );
-  /* Sem isto o fio é uma linha de 2px e passa despercebido. O halo é o que
-     faz ler como luz correndo, e não como uma borda que mudou de cor. */
-  filter: drop-shadow(0 0 5px rgba(246, 227, 161, 0.55));
+  /* Sem filtro aqui de propósito: o halo já vem do box-shadow do elemento,
+     que orbita junto. Ter os dois era brilho duplicado, e  força uma
+     camada própria que é re-rasterizada a cada quadro — custo puro. */
   /* Recorta o miolo e deixa só o anel: uma máscara cobre a caixa inteira,
      outra cobre só a caixa de conteúdo, e `exclude` subtrai a segunda da
      primeira. Sobra a moldura de 1,5px. */

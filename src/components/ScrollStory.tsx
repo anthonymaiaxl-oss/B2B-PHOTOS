@@ -3,6 +3,7 @@
 import { eventConfig } from "@/config/event";
 import ParallaxImage from "./ParallaxImage";
 import Reveal from "./Reveal";
+import MomentsLottie from "./MomentsLottie";
 import StrategyChart from "./StrategyChart";
 import type { AlbumWithPhotos, Photo } from "@/types";
 
@@ -57,6 +58,14 @@ const STORY_FOCUS = ["object-[78%_50%] md:object-center", "", "", ""];
  */
 const CAPITULO_COM_GRAFICO = 2;
 
+/**
+ * MOMENTOS (04) também não usa imagem: usa a animação vetorial recolorida.
+ *
+ * Mesmo esquema do capítulo 03 — trocar por -1 devolve a imagem apontada em
+ * `sectionImages.story[3]`.
+ */
+const CAPITULO_COM_ANIMACAO = 3;
+
 export default function ScrollStory({
   albums,
   photos,
@@ -66,7 +75,7 @@ export default function ScrollStory({
   photos?: (Photo | null)[];
 }) {
   return (
-    <section className="px-[22px]">
+    <section className="sem-pular px-[22px]">
       <div className="mx-auto flex max-w-[1180px] flex-col gap-[clamp(90px,17vh,180px)] py-[clamp(80px,15vh,160px)]">
         {eventConfig.story.map((chapter, index) => {
           const album = albums.length ? albums[index % albums.length] : null;
@@ -102,6 +111,8 @@ export default function ScrollStory({
 
                 {index === CAPITULO_COM_GRAFICO ? (
                   <StrategyChart className={quadro} />
+                ) : index === CAPITULO_COM_ANIMACAO ? (
+                  <MomentsLottie className={quadro} />
                 ) : (
                   <ParallaxImage
                     photo={photo}
