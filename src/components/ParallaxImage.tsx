@@ -14,6 +14,7 @@ export default function ParallaxImage({
   priority = false,
   src,
   sizes = "100vw",
+  imgClassName = "",
 }: {
   photo: Photo | null;
   alt: string;
@@ -24,6 +25,13 @@ export default function ParallaxImage({
   src?: string;
   /** Quanto da viewport a imagem ocupa — orienta a escolha do srcSet. */
   sizes?: string;
+  /**
+   * Classes aplicadas na `<img>`, não no quadro. Serve para o ponto de corte:
+   * o bloco é 4/3 no celular e 16/9 no desktop, então uma mesma imagem é
+   * cortada de formas diferentes. `object-[78%_50%] md:object-center` mantém
+   * o assunto no quadro quando ele não está no meio da foto.
+   */
+  imgClassName?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({
@@ -48,7 +56,7 @@ export default function ParallaxImage({
             alt={alt}
             loading={priority ? "eager" : "lazy"}
             decoding="async"
-            className="h-full w-full object-cover"
+            className={`h-full w-full object-cover ${imgClassName}`}
           />
         )}
       </motion.div>

@@ -26,6 +26,31 @@ import type { AlbumWithPhotos, Photo } from "@/types";
  *
  * As fotos continuam vindo do Drive — nenhuma imagem fixa no código.
  */
+/**
+ * Ponto de corte de cada capítulo, na mesma ordem de `sectionImages.story`
+ * (01 CONHECIMENTO, 02 NETWORKING, 03 ESTRATÉGIA, 04 MOMENTOS).
+ *
+ * O quadro é 4/3 no celular e 16/9 no desktop, e o parallax ainda mostra só a
+ * parte central. Uma imagem cujo assunto não está no meio precisa dizer para
+ * onde puxar o corte, senão o assunto some justamente na tela pequena.
+ *
+ * CONHECIMENTO: o notebook está à direita na foto. No celular puxa para 78%,
+ * o que mantém a tela inteira no quadro; no desktop cabe tudo e volta ao
+ * centro, preservando o homem e a caneca na composição.
+ *
+ * NETWORKING: a frase "CONEXÕES QUE GERAM VALOR" está na parede à direita e
+ * ficava cortada no meio da palavra VALOR. 61% resolve sem perder o aperto de
+ * mão, que continua no centro do quadro.
+ *
+ * Vazio = corte centrado, que é o certo para os fundos gráficos abstratos.
+ */
+const STORY_FOCUS = [
+  "object-[78%_50%] md:object-center",
+  "object-[61%_50%] md:object-center",
+  "",
+  "",
+];
+
 export default function ScrollStory({
   albums,
   photos,
@@ -67,6 +92,7 @@ export default function ScrollStory({
                 <ParallaxImage
                   photo={photo}
                   src={eventConfig.sectionImages.story[index] || undefined}
+                  imgClassName={STORY_FOCUS[index] ?? ""}
                   sizes="(min-width: 768px) 66vw, 100vw"
                   alt={`${chapter.word} — ${eventConfig.name}`}
                   depth={0.1 + index * 0.02}
